@@ -1,3 +1,14 @@
+#project
+.DS_Store
+.vscode
+*.log
+*.sh
+*.conf
+out
+build
+test
+
+
 # Prerequisites
 *.d
 
