@@ -88,7 +88,9 @@ static void fill_conf(config_t *conf, const char *k, const char *v) {
     } else if (strcmp("target_port", k) == 0) {
         conf->target_port = (unsigned short)atoi(v);
     } else if (strcmp("password", k) == 0) {
+        _LOG("before init key ......");
 #ifndef SOCKS5
+        _LOG("init key ......");
         pwd2key(conf->key, CIPHER_KEY_LEN, v, strlen(v));
 #endif
     } else if (strcmp("timeout", k) == 0) {

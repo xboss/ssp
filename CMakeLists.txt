@@ -18,15 +18,13 @@ aux_source_directory(${PROJECT_SOURCE_DIR}/src DIR_SRCS)
 add_executable(ssp ${DIR_SRCS})
 target_link_libraries(ssp ssl)
 target_link_libraries(ssp crypto)
+target_link_libraries(ssp pthread)
 
 ############# socks5 server (linux only) #############
 if(${CMAKE_SYSTEM_NAME} STREQUAL Linux)
-ADD_DEFINITIONS(-DSOCKS5)
-#SET (SOCKS5_SRCS network.c nwpipe.c socks.c main.c ssev_epoll.c dns_resolver.c thread_pool.c)
-#add_executable(socks5_server ${SOCKS5_SRCS})
 list(REMOVE_ITEM DIR_SRCS "${PROJECT_SOURCE_DIR}/src/cipher.c")
-#message("src:${DIR_SRCS}")
 add_executable(socks5_server ${DIR_SRCS})
+target_compile_definitions(socks5_server PUBLIC -DSOCKS5)
 target_link_libraries(socks5_server pthread)
 endif()
 
