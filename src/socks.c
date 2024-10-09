@@ -79,12 +79,16 @@ static void domain_cb(domain_req_t *req) {
         char *ip = get_domain_req_ip(req);
         unsigned short port = get_domain_req_port(req);
         char ack[SS5_REQ_ACK_MAX_SZ];
+        memset(ack, 0, SS5_REQ_ACK_MAX_SZ);
         ack[0] = SS5_VER;
         ack[1] = SS5_REP_OK;
         ack[3] = SS5_ATYP_DOMAIN;
-        ack[4] = d_len;
+        ack[4] = d_len & 0xff;
+        _LOG("domain_cb d_len:%d name:%s", d_len, name);
         memcpy(ack + 5, name, d_len);
-        ack[5 + d_len] = ntohs(port);
+        unsigned short nport = htons(port);
+        /* ack[5 + d_len] = htons(port); */
+        memcpy(ack + 5 + d_len, &nport, 2);
 
         int cp_fd = nwpipe_connect(pipe, ip, port, src_fd, 0, 0);
         if (cp_fd <= 0) {
@@ -92,6 +96,13 @@ static void domain_cb(domain_req_t *req) {
             /* free_domain_req(req); */
             return;
         }
+
+        /*         int i;
+                printf("ack:");
+                for (i = 0; i < 7 + d_len + 1; i++) {
+                    printf("%.2X ", ack[i]);
+                }
+                printf("\n"); */
 
         int rt = nwpipe_send(pipe, src_fd, ack, 7 + d_len);
         if (rt == -1) {
@@ -200,12 +211,12 @@ static void ss5_req(nwpipe_t *pipe, int fd, const char *buf, int len) {
         addr.s_addr = *(uint32_t *)(buf + 4);
         char *ipp = inet_ntoa(addr);
         memcpy(ip, ipp, strlen(ipp));
-        port = htons(*(uint16_t *)(buf + 8));
+        port = ntohs(*(uint16_t *)(buf + 8));
         _LOG("socks5 ip:%s:%u", ip, port);
     } else if (atyp == SS5_ATYP_DOMAIN) {
         int d_len = (int)(buf[4] & 0xff);
         assert(d_len <= SS5_DOMAIN_NAME_MAX_SZ);
-        port = htons(*(uint16_t *)(buf + 4 + d_len + 1));
+        port = ntohs(*(uint16_t *)(buf + 4 + d_len + 1));
         domain_req_t *req = init_domain_req(fd, buf + 5, d_len, domain_cb, port, pipe);
         if (!req) {
             nwpipe_close_conn(pipe, fd);

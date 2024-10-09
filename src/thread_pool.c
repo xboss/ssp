@@ -75,6 +75,7 @@ threadpool_t *threadpool_init(int num_threads, int max_tasks) {
     pthread_cond_init(&pool->cond, NULL);
     int i;
     for (i = 0; i < num_threads; i++) {
+        printf("create thread %d tid:%lu", i, pthread_self());
         pthread_create(&pool->threads[i], NULL, worker, pool);
     }
     return pool;

@@ -111,6 +111,7 @@ static void worker(void *arg) {
     }
     g_req_queue_size++;
     pthread_mutex_unlock(&g_lock);
+    _LOG("dns worker tid:%lu id:%d  name:%p req:%p", req->id, pthread_self(), req->name, req);
     if (notify() != _OK) {
         _LOG("notify failled in dns.");
         /* remove req */
@@ -161,7 +162,7 @@ static int ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) {
     if (req_q) {
         domain_req_t *req_tmp = NULL;
         while (req_q != NULL) {
-            _LOG("dns worker: tid:%lu name:%p req:%p", pthread_self(), req_q->name, req_q);
+            _LOG("dns ssev_cb tid:%lu name:%p req:%p", pthread_self(), req_q->name, req_q);
             req_q->cb(req_q);
             req_tmp = req_q;
             req_q = req_q->next;
