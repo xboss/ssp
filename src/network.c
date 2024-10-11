@@ -119,7 +119,8 @@ static int ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) {
                 _LOG("read EAGAIN fd:%d errno:%d", fd, errno);
                 break;
             } else if ((ret == -1) && !((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
-                fprintf(stderr, "read error, remove fd:%d errno:%d\n", fd, errno);
+                /* fprintf(stderr, "read error, remove fd:%d errno:%d\n", fd, errno); */
+                _LOG("read error, remove fd:%d errno:%d", fd, errno);
                 ssev_unwatch(nw->loop, SSEV_EV_ALL, fd);
                 nw->on_close(nw, fd);
                 close(fd);
