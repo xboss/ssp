@@ -7,6 +7,7 @@
 #include <sys/time.h>
 
 #include "network.h"
+#include "stream_buf.h"
 #include "uthash.h"
 
 #ifdef DEBUG
@@ -49,8 +50,10 @@ struct conn_s {
     int type;
     int ex;
     int can_write;
-    msg_queue_t *sending_q;
-    msg_queue_t *receiving_q;
+    stream_buf_t *snd_buf;
+    stream_buf_t *rcv_buf;
+    /*     msg_queue_t *sending_q;
+        msg_queue_t *receiving_q; */
     UT_hash_handle hh;
 };
 typedef struct conn_s conn_t;
@@ -186,17 +189,19 @@ static conn_t *init_conn(int fd) {
     }
     memset(c, 0, sizeof(conn_t));
     c->fd = fd;
-    c->sending_q = init_msg_queue();
-    if (!c->sending_q) {
-        free(c);
-        return NULL;
-    }
-    c->receiving_q = init_msg_queue();
-    if (!c->receiving_q) {
-        free_msg_queue(c->sending_q);
-        free(c);
-        return NULL;
-    }
+    c->snd_buf = sb_init(NULL, 0);
+    c->rcv_buf = sb_init(NULL, 0);
+    /*     c->sending_q = init_msg_queue();
+        if (!c->sending_q) {
+            free(c);
+            return NULL;
+        }
+        c->receiving_q = init_msg_queue();
+        if (!c->receiving_q) {
+            free_msg_queue(c->sending_q);
+            free(c);
+            return NULL;
+        } */
     c->can_write = 0;
     return c;
 }
@@ -230,10 +235,14 @@ static void del_conn(nwpipe_t *pipe, conn_t *c) {
         return;
     }
     _LOG("del conn fd:%d", c->fd);
-    free_msg_queue(c->sending_q);
-    c->sending_q = NULL;
-    free_msg_queue(c->receiving_q);
-    c->receiving_q = NULL;
+    /*     free_msg_queue(c->sending_q);
+        c->sending_q = NULL;
+        free_msg_queue(c->receiving_q);
+        c->receiving_q = NULL; */
+    sb_free(c->snd_buf);
+    c->snd_buf = NULL;
+    sb_free(c->rcv_buf);
+    c->rcv_buf = NULL;
     if (pipe->conn_tb) {
         HASH_DEL(pipe->conn_tb, c);
     }
@@ -281,7 +290,7 @@ static int unpack(nwpipe_t *pipe, int fd, const char *buf, int len) {
         if (rlen < PACKET_HEAD_LEN) {
             assert(pending_buf);
             assert(rlen > 0);
-            m = init_msg(pending_buf, rlen);
+            /* m = init_msg(pending_buf, rlen);
             assert(m);
             assert(conn);
             assert(conn->fd > 0);
@@ -289,6 +298,10 @@ static int unpack(nwpipe_t *pipe, int fd, const char *buf, int len) {
             if (push_msg(conn->receiving_q, m) != 0) {
                 _LOG("unpack push_msg error");
                 free_msg(m);
+                return _ERR;
+            } */
+            if (sb_write(conn->rcv_buf, pending_buf, rlen) != 0) {
+                _LOG("unpack sb_write error 1");
                 return _ERR;
             }
             break;
@@ -304,7 +317,11 @@ static int unpack(nwpipe_t *pipe, int fd, const char *buf, int len) {
         if (rlen < payload_len + PACKET_HEAD_LEN) {
             assert(pending_buf);
             assert(rlen > 0);
-            m = init_msg(pending_buf, rlen);
+            if (sb_write(conn->rcv_buf, pending_buf, rlen) != 0) {
+                _LOG("unpack sb_write error 2");
+                return _ERR;
+            }
+            /* m = init_msg(pending_buf, rlen);
             assert(m);
             assert(conn);
             assert(conn->fd > 0);
@@ -313,7 +330,7 @@ static int unpack(nwpipe_t *pipe, int fd, const char *buf, int len) {
                 _LOG("unpack push_msg error");
                 free_msg(m);
                 return _ERR;
-            }
+            } */
             break;
         }
         assert(conn);
@@ -344,55 +361,38 @@ static int flush_tcp_send(network_t *nw, conn_t *c) {
 
     /* consume sending buf */
     _LOG("flush_tcp_send in. fd:%d", c->fd);
-    msg_t *m = NULL;
-    int rt;
-    char *buf;
-    int buf_len;
-    while (c->sending_q->size > 0) {
-        m = take_msg(c->sending_q);
-        if (!m) continue;
-        buf = m->buf + m->offset;
-        buf_len = m->buf_len - m->offset;
-        if (buf_len <= 0) {
-            _LOG("flush_tcp_send offset error buf_len:%d offset:%d", m->buf_len, m->offset);
-            m = pop_msg(c->sending_q);
-            free_msg(m);
-            continue;
-        }
-        assert(buf >= m->buf);
-        assert(m->offset >= 0);
-        rt = nw_tcp_send(nw, c->fd, buf, buf_len);
-        if (rt == 0 || rt == -2) {
-            _LOG("flush_tcp_send error fd:%d rt:%d len:%d", c->fd, rt, buf_len);
-            return _ERR;
-        } else if (rt == -1) {
-            /* pending */
-            c->can_write = 0;
-            _LOG("flush_tcp_send pending send fd:%d type:%d snd_buf_len:%d snd_q_size:%d", c->fd, c->type,
-                 c->sending_q->sum_buf_len, c->sending_q->size);
-            break;
-        } else if (rt < buf_len) {
-            /* remain */
-            assert(rt > 0);
-            m->offset += rt;
-            _LOG("flush_tcp_send remain send fd:%d len:%d", c->fd, rt);
-        } else {
-            /* ok */
-            assert(rt == buf_len);
-            m = pop_msg(c->sending_q);
-            free_msg(m);
-
-            /* TODO: debug */
-            /*             int snd_q_size = 0;
-                        int snd_buf_len = 0;
-                        if (c->sending_q) {
-                            snd_q_size = c->sending_q->size;
-                            snd_buf_len = c->sending_q->sum_buf_len;
-                        }
-                        _LOG("flush_tcp_send real send ok. fd:%d len:%d type:%d snd_buf_len:%d snd_q_size:%d", c->fd,
-               rt, c->type, snd_buf_len, snd_q_size); */
-        }
+    int buf_len = sb_get_size(c->snd_buf);
+    if (buf_len <= 0) {
+        _LOG("flush_tcp_send no buf fd:%d", c->fd);
+        return _OK;
     }
+    char *buf = (char *)malloc(buf_len);
+    if (!buf) {
+        perror("allocate memory error");
+        return _ERR;
+    }
+    if (sb_read_all(c->snd_buf, buf, buf_len) != buf_len) {
+        _LOG("flush_tcp_send sb_read_all error");
+        free(buf);
+        return _ERR;
+    }
+    int rt = nw_tcp_send(nw, c->fd, buf, buf_len);
+    if (rt == 0 || rt == -2) {
+        _LOG("flush_tcp_send error fd:%d rt:%d len:%d", c->fd, rt, buf_len);
+        free(buf);
+        return _ERR;
+    } else if (rt == -1) {
+        /* pending */
+        c->can_write = 0;
+        _LOG("flush_tcp_send pending send fd:%d type:%d buf_len:%d", c->fd, c->type, buf_len);
+        sb_write(c->snd_buf, buf, buf_len);
+    } else if (rt < buf_len) {
+        /* remain */
+        _LOG("flush_tcp_send remain send fd:%d len:%d", c->fd, rt);
+        assert(rt > 0);
+        sb_write(c->snd_buf, buf + rt, buf_len - rt);
+    }
+    free(buf);
     _LOG("flush_tcp_send ok. fd:%d", c->fd);
     return _OK;
 }
@@ -408,9 +408,25 @@ static int on_recv(network_t *nw, int fd, const char *buf, int len) {
     }
     int rt = _OK;
     char *r_buf = (char *)buf;
-    int r_buf_len = 0;
-    if (conn->receiving_q && conn->receiving_q->size > 0) {
-        /* consume pending buf */
+    int r_buf_len = len;
+    int rcv_buf_sz = sb_get_size(conn->rcv_buf);
+    if (rcv_buf_sz > 0) {
+        _LOG("nwpipe on_recv consume receiving buf fd:%d size:%d", fd, rcv_buf_sz);
+        r_buf_len = rcv_buf_sz + len;
+        r_buf = (char *)malloc(r_buf_len);
+        if (!r_buf) {
+            perror("allocate memory error");
+            return _ERR;
+        }
+        if (sb_read_all(conn->rcv_buf, r_buf, r_buf_len) != rcv_buf_sz) {
+            _LOG("on_recv sb_read_all error");
+            free(r_buf);
+            return _ERR;
+        }
+        memcpy(r_buf + rcv_buf_sz, buf, len);
+    }
+
+    /* if (conn->receiving_q && conn->receiving_q->size > 0) {
         _LOG("nwpipe on_recv consume pending buf fd:%d size:%d sum_buf_len:%d", fd, conn->receiving_q->size,
              conn->receiving_q->sum_buf_len);
         assert(conn->receiving_q->sum_buf_len > 0);
@@ -435,7 +451,7 @@ static int on_recv(network_t *nw, int fd, const char *buf, int len) {
              conn->receiving_q->sum_buf_len);
     } else {
         r_buf_len = len;
-    }
+    } */
 
     if (conn->is_packet) {
         /* unpack */
@@ -583,8 +599,8 @@ void nwpipe_free(nwpipe_t *pipe) {
 void nwpipe_close_conn(nwpipe_t *pipe, int fd) {
     conn_t *c = get_conn(pipe, fd);
     if (!c) return;
-    c->status = NWPIPE_CONN_ST_OFF;
     conn_t *cp = get_conn(pipe, c->cp_fd);
+    c->status = NWPIPE_CONN_ST_OFF;
     _LOG("close fd:%d", c->fd);
     nw_tcp_close(pipe->nw, c->fd);
     del_conn(pipe, c);
@@ -598,20 +614,18 @@ void nwpipe_close_conn(nwpipe_t *pipe, int fd) {
 
 int nwpipe_connect(nwpipe_t *pipe, const char *ip, unsigned short port, int cp_fd, int is_secret, int is_packet) {
     if (!pipe || port <= 0 || !ip || cp_fd <= 0) return _ERR;
-    conn_t *conn = init_conn(0);
+    int fd = nw_tcp_connect(pipe->nw, ip, port);
+    _LOG("nwpipe_connect fd:%d cp_fd:%d", fd, cp_fd);
+    if (fd <= 0) {
+        _LOG("tcp connect error");
+        return _ERR;
+    }
+    conn_t *conn = init_conn(fd);
     if (!conn) return _ERR;
     conn->status = NWPIPE_CONN_ST_READY;
     conn->type = NWPIPE_CONN_TYPE_BK;
     conn->is_packet = is_packet;
     conn->is_secret = is_secret;
-    int fd = nw_tcp_connect(pipe->nw, ip, port);
-    _LOG("nwpipe_connect fd:%d cp_fd:%d", fd, cp_fd);
-    if (fd <= 0) {
-        _LOG("tcp connect error");
-        del_conn(pipe, conn);
-        return _ERR;
-    }
-    conn->fd = fd;
     conn_t *cp_conn = get_conn(pipe, cp_fd);
     if (!cp_conn) {
         nwpipe_close_conn(pipe, fd);
@@ -636,14 +650,21 @@ int nwpipe_send(nwpipe_t *pipe, int fd, const char *buf, int len) {
     }
     assert(w_buf);
     assert(w_buf_len > 0);
-    msg_t *m = init_msg(w_buf, w_buf_len);
+    int rt = sb_write(c->snd_buf, w_buf, w_buf_len);
+    if (w_buf != buf) free(w_buf);
+    if (rt != 0) {
+        _LOG("nwpipe_send sb_write error fd:%d len:%d", c->fd, w_buf_len);
+        return _ERR;
+    }
+
+    /* msg_t *m = init_msg(w_buf, w_buf_len);
     if (w_buf && w_buf != buf) free(w_buf);
     if (!m) {
         _LOG("nwpipe_send init_msg error fd:%d len:%d", c->fd, w_buf_len);
         return _ERR;
     }
-    push_msg(c->sending_q, m);
-    int rt = _OK;
+    push_msg(c->sending_q, m); */
+    rt = _OK;
     ssev_notify_write(pipe->loop, fd);
     if (c->status == NWPIPE_CONN_ST_ON && c->can_write) {
         rt = flush_tcp_send(pipe->nw, c);

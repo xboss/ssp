@@ -57,7 +57,38 @@ static int add_block(stream_buf_t *sb, const char *buf, int len) {
     return wlen;
 }
 
-char *sb_read(stream_buf_t *sb, int *out_len) {
+int sb_get_size(stream_buf_t *sb) {
+    if (!sb) return 0;
+    return sb->sum_buf_sz;
+}
+
+int sb_read_all(stream_buf_t *sb, char *out, int len) {
+    if (!sb || !out || len <= 0 || sb->sum_buf_sz <= 0 || len < sb->sum_buf_sz) return 0;
+    int out_len = sb->sum_buf_sz;
+    sb_block_t *blk;
+    int i, rlen, b_cnt = sb->block_cnt;
+    for (i = 0; i < b_cnt; i++) {
+        blk = sb->head;
+        rlen = DEF_SB_BLOCK_SZ;
+        if (i == b_cnt - 1) {
+            rlen = DEF_SB_BLOCK_SZ - sb->space_sz;
+        }
+        memcpy(out + i * DEF_SB_BLOCK_SZ, blk->buf, rlen);
+        if (i < b_cnt - 1) {
+            sb->head = sb->head->next;
+            free(blk);
+            sb->block_cnt--;
+        }
+        sb->sum_buf_sz -= rlen;
+    }
+    assert(sb->sum_buf_sz == 0);
+    assert(sb->block_cnt == 1);
+    assert(sb->head == sb->tail);
+    sb->space_sz = DEF_SB_BLOCK_SZ;
+    return out_len;
+}
+
+/* char *sb_read(stream_buf_t *sb, int *out_len) {
     if (!sb || !out_len || sb->sum_buf_sz <= 0) return NULL;
     _ALLOC(buf, char *, sb->sum_buf_sz);
     *out_len = sb->sum_buf_sz;
@@ -82,7 +113,7 @@ char *sb_read(stream_buf_t *sb, int *out_len) {
     assert(sb->head == sb->tail);
     sb->space_sz = DEF_SB_BLOCK_SZ;
     return buf;
-}
+} */
 
 int sb_write(stream_buf_t *sb, const char *buf, int len) {
     if (!sb || !buf || len <= 0) return _ERR;
@@ -116,9 +147,10 @@ void sb_free(stream_buf_t *sb) {
     int i;
     for (i = 0; i < sb->block_cnt; i++) {
         blk = sb->head;
-        free(blk);
         sb->head = sb->head->next;
+        free(blk);
     }
+    free(sb);
 }
 
 stream_buf_t *sb_init(const char *buf, int len) {
@@ -157,26 +189,16 @@ stream_buf_t *sb_init(const char *buf, int len) {
     int wlen1 = 2222;
     sb_write(sb, wbuf + wlen, wlen1);
 
-    int rlen = 0;
-    char *rbuf = sb_read(sb, &rlen);
+    _ALLOC(rbuf, char *, TEST_SB_LEN);
+    int rlen = sb_read_all(sb, rbuf, TEST_SB_LEN);
 
     for (i = 0; i < rlen; i++) {
         assert(rbuf[i] == wbuf[i]);
     }
 
     printf("test. %d\n", rlen);
-
-    int wlen2 = 133;
-    sb_write(sb, wbuf, wlen2);
-
-    rbuf = sb_read(sb, &rlen);
-
-    for (i = 0; i < rlen; i++) {
-        assert(rbuf[i] == wbuf[i]);
-    }
-
     sb_free(sb);
 
-    printf("test OK. %d\n", rlen);
+    printf("test OK.\n");
     return 0;
 } */

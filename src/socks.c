@@ -73,6 +73,8 @@ static void domain_cb(domain_req_t *req) {
     int src_fd = get_domain_req_id(req);
     nwpipe_t *pipe = get_domain_req_userdata(req);
     if (src_fd > 0 && pipe && get_domain_req_resp(req) == 0) {
+        int src_status = nwpipe_get_conn_status(pipe, src_fd);
+        if (src_status == 0) return;
         char *name = get_domain_req_name(req);
         int d_len = strlen(get_domain_req_name(req));
         assert(d_len > 0 && d_len < SS5_REQ_ACK_MAX_SZ);
@@ -93,6 +95,7 @@ static void domain_cb(domain_req_t *req) {
         int cp_fd = nwpipe_connect(pipe, ip, port, src_fd, 0, 0);
         if (cp_fd <= 0) {
             nwpipe_close_conn(pipe, src_fd);
+            nwpipe_close_conn(pipe, cp_fd); /* TODO: */
             /* free_domain_req(req); */
             return;
         }
@@ -107,6 +110,7 @@ static void domain_cb(domain_req_t *req) {
         int rt = nwpipe_send(pipe, src_fd, ack, 7 + d_len);
         if (rt == -1) {
             nwpipe_close_conn(pipe, src_fd);
+            nwpipe_close_conn(pipe, cp_fd); /* TODO: */
             /* free_domain_req(req); */
             return;
         }
