@@ -73,7 +73,7 @@ static void domain_cb(domain_req_t *req) {
     int src_fd = get_domain_req_id(req);
     nwpipe_t *pipe = get_domain_req_userdata(req);
     if (src_fd > 0 && pipe && get_domain_req_resp(req) == 0) {
-        int src_status = nwpipe_get_conn_status(pipe, src_fd);
+        int src_status = pconn_get_status(src_fd);
         if (src_status == 0) return;
         char *name = get_domain_req_name(req);
         int d_len = strlen(get_domain_req_name(req));
@@ -115,7 +115,7 @@ static void domain_cb(domain_req_t *req) {
             return;
         }
         _LOG("dns socks5 nwpipe_send ok fd:%d", src_fd);
-        nwpipe_set_conn_ex(pipe, src_fd, SS5_PHASE_DATA);
+        pconn_set_ex(src_fd, SS5_PHASE_DATA);
     } else {
         _LOG("dns domain_cb error fd:%d", src_fd);
         nwpipe_close_conn(pipe, src_fd);
@@ -154,7 +154,7 @@ static void ss5_auth(nwpipe_t *pipe, int fd, const char *buf, int len) {
         nwpipe_close_conn(pipe, fd);
         return;
     }
-    nwpipe_set_conn_ex(pipe, fd, phase);
+    pconn_set_ex(fd, phase);
 }
 
 static void ss5_auth_np(nwpipe_t *pipe, int fd, const char *buf, int len) {
@@ -185,7 +185,7 @@ static void ss5_auth_np(nwpipe_t *pipe, int fd, const char *buf, int len) {
         nwpipe_close_conn(pipe, fd);
         return;
     }
-    nwpipe_set_conn_ex(pipe, fd, SS5_PHASE_REQ);
+    pconn_set_ex(fd, SS5_PHASE_REQ);
 }
 
 static void ss5_req(nwpipe_t *pipe, int fd, const char *buf, int len) {
@@ -253,11 +253,11 @@ static void ss5_req(nwpipe_t *pipe, int fd, const char *buf, int len) {
         return;
     }
     _LOG("socks5 nwpipe_send ok fd:%d", fd);
-    nwpipe_set_conn_ex(pipe, fd, SS5_PHASE_DATA);
+    pconn_set_ex(fd, SS5_PHASE_DATA);
 }
 
 static int on_backend_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
-    int cp_fd = nwpipe_get_couple_fd(pipe, fd);
+    int cp_fd = pconn_get_couple_id(fd);
     if (cp_fd <= 0) {
         return -1;
     }
@@ -272,7 +272,8 @@ static int on_backend_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
 }
 
 static int on_front_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
-    int phase = nwpipe_get_conn_ex(pipe, fd);
+    int phase = pconn_get_ex(fd);
+    assert(phase != 0);
     if (phase == SS5_PHASE_AUTH) {
         ss5_auth(pipe, fd, buf, len);
     } else if (phase == SS5_PHASE_REQ) {
@@ -280,7 +281,7 @@ static int on_front_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
     } else if (phase == SS5_PHASE_AUTH_NP) {
         ss5_auth_np(pipe, fd, buf, len);
     } else if (phase == SS5_PHASE_DATA) {
-        int cp_fd = nwpipe_get_couple_fd(pipe, fd);
+        int cp_fd = pconn_get_couple_id(fd);
         if (cp_fd <= 0) {
             return -1;
         }
@@ -304,10 +305,10 @@ int on_socks_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
     if (!pipe || fd <= 0 || !buf || len <= 0) {
         return -1;
     }
-    int conn_type = nwpipe_get_conn_type(pipe, fd);
-    if (conn_type == NWPIPE_CONN_TYPE_FR) {
+    int conn_type = pconn_get_type(fd);
+    if (conn_type == PCONN_TYPE_FR) {
         return on_front_recv(pipe, fd, buf, len);
-    } else if (conn_type == NWPIPE_CONN_TYPE_BK) {
+    } else if (conn_type == PCONN_TYPE_BK) {
         return on_backend_recv(pipe, fd, buf, len);
     } else {
         _LOG("connection type error");
@@ -317,6 +318,6 @@ int on_socks_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
 }
 
 int on_socks_accept(nwpipe_t *pipe, int fd) {
-    nwpipe_set_conn_ex(pipe, fd, SS5_PHASE_AUTH);
+    pconn_set_ex(fd, SS5_PHASE_AUTH);
     return 0;
 }

@@ -35,7 +35,6 @@ struct stream_buf_s {
     int sum_buf_sz;
     int space_sz;
 };
-typedef struct stream_buf_s stream_buf_t;
 
 static int add_block(stream_buf_t *sb, const char *buf, int len) {
     _ALLOC(block, sb_block_t *, sizeof(sb_block_t));

@@ -111,9 +111,9 @@ static int ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) {
             ret = read(fd, nw->read_buf, nw->read_buf_size);
             if (ret == 0) {
                 _LOG("remove fd:%d", fd);
-                ssev_unwatch(nw->loop, SSEV_EV_ALL, fd);
+                /* ssev_unwatch(nw->loop, SSEV_EV_ALL, fd); */
                 nw->on_close(nw, fd);
-                close(fd);
+                /* close(fd); */
                 break;
             } else if ((ret == -1) && ((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
                 _LOG("read EAGAIN fd:%d errno:%d", fd, errno);
@@ -121,9 +121,9 @@ static int ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) {
             } else if ((ret == -1) && !((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
                 /* fprintf(stderr, "read error, remove fd:%d errno:%d\n", fd, errno); */
                 _LOG("read error, remove fd:%d errno:%d", fd, errno);
-                ssev_unwatch(nw->loop, SSEV_EV_ALL, fd);
+                /* ssev_unwatch(nw->loop, SSEV_EV_ALL, fd); */
                 nw->on_close(nw, fd);
-                close(fd);
+                /* close(fd); */
                 break;
             } else {
                 _LOG("once read fd:%d ret:%d", fd, ret);
@@ -200,7 +200,7 @@ void nw_tcp_close(network_t *nw, int fd) {
         return;
     }
     int rt = ssev_unwatch(nw->loop, SSEV_EV_ALL, fd);
-    assert(rt == 0); /* TODO: debug*/
+    assert(rt == 0);
     close(fd);
     _LOG("nw_tcp_close fd:%d", fd);
 }

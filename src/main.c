@@ -169,7 +169,7 @@ int check_config(config_t *conf) {
 /* ---------- pipe callback ---------- */
 
 static int on_pipe_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
-    int cp_fd = nwpipe_get_couple_fd(pipe, fd);
+    int cp_fd = pconn_get_couple_id(fd);
     if (cp_fd <= 0) {
         _LOG("couple does not exists. fd:%d", fd);
         return -1;
@@ -177,7 +177,7 @@ static int on_pipe_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
     char *plain = (char *)buf;
     int plain_len = len;
 #ifndef SOCKS5
-    if (nwpipe_is_conn_secret(pipe, fd)) {
+    if (pconn_is_secret(fd)) {
         plain = aes_decrypt(g_conf.key, buf, len, &plain_len);
         _LOG("decrypt ");
     }
@@ -185,7 +185,7 @@ static int on_pipe_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
     char *cihper = plain;
     int cipher_len = plain_len;
 #ifndef SOCKS5
-    if (nwpipe_is_conn_secret(pipe, cp_fd)) {
+    if (pconn_is_secret(cp_fd)) {
         cihper = aes_encrypt(g_conf.key, plain, plain_len, &cipher_len);
         _LOG("encrypt ");
         assert(cipher_len % 16 == 0);
@@ -208,13 +208,13 @@ static int on_pipe_accept(nwpipe_t *pipe, int fd) {
     int is_cp_secret = 0;
     int is_cp_packet = 0;
     if (g_conf.mode == NWPIPE_MODE_LOCAL) {
-        nwpipe_set_conn_packet(pipe, fd, 0);
-        nwpipe_set_conn_secret(pipe, fd, 0);
+        pconn_set_is_packet(fd, 0);
+        pconn_set_is_secret(fd, 0);
         is_cp_secret = 1;
         is_cp_packet = 1;
     } else {
-        nwpipe_set_conn_packet(pipe, fd, 1);
-        nwpipe_set_conn_secret(pipe, fd, 1);
+        pconn_set_is_packet(fd, 1);
+        pconn_set_is_secret(fd, 1);
         is_cp_secret = 0;
         is_cp_packet = 0;
     }
