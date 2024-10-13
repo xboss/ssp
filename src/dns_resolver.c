@@ -14,15 +14,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "sslog.h"
 #include "thread_pool.h"
-
-#ifdef DEBUG
-#include "debug.h"
-#endif
-
-#ifndef _LOG
-#define _LOG(fmt, ...)
-#endif
 
 #define _OK 0
 #define _ERR -1
@@ -78,7 +71,7 @@ static int notify() {
 
 static void worker(void *arg) {
     if (!arg) {
-        fprintf(stderr, "worker's arg is NULL in dns resolver.\n");
+        _LOG_E("worker's arg is NULL in dns resolver.");
         return;
     }
     domain_req_t *req = (domain_req_t *)arg;
@@ -90,7 +83,7 @@ static void worker(void *arg) {
     req->resp = _OK;
     int ret = getaddrinfo(req->name, NULL, &hints, &req->addrinfo);
     if (ret != 0) {
-        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(ret));
+        _LOG_E("getaddrinfo error: %s", gai_strerror(ret));
         req->resp = _ERR;
     }
     if (ret == 0 &&

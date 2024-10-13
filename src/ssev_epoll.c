@@ -8,15 +8,8 @@
 #include <unistd.h>
 
 #include "ssev.h"
+#include "sslog.h"
 #include "uthash.h"
-
-#ifdef DEBUG
-#include "debug.h"
-#endif
-
-#ifndef _LOG
-#define _LOG(fmt, ...)
-#endif
 
 #define SSEV_OK 0
 #define SSEV_ERR -1
@@ -188,7 +181,7 @@ int ssev_run(ssev_loop_t *loop) {
                 /* _LOG("fd:%d is writeable", fd); */
                 event_callback(loop, SSEV_EV_WRITE, fd);
             } else if ((events[i].events & EPOLLERR) || ((events[i].events & EPOLLHUP))) {
-                fprintf(stderr, "epoll event error. fd:%d event:%u\n", fd, events[i].events);
+                _LOG_E("epoll event error. fd:%d event:%u", fd, events[i].events);
                 epoll_ctl(loop->efd, EPOLL_CTL_DEL, fd, NULL);
             }
         }

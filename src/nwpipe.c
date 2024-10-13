@@ -8,16 +8,9 @@
 
 #include "ilist.h"
 #include "network.h"
+#include "sslog.h"
 #include "stream_buf.h"
 #include "uthash.h"
-
-#ifdef DEBUG
-#include "debug.h"
-#endif
-
-#ifndef _LOG
-#define _LOG(fmt, ...)
-#endif
 
 #define _OK 0
 #define _ERR -1
@@ -80,7 +73,7 @@ static int unpack(nwpipe_t *pipe, int fd, const char *buf, int len) {
         payload_len = ntohl(*(uint32_t *)(p));
         /* TODO: check payload_len */
         if (payload_len <= 0 || payload_len > 65535) {
-            fprintf(stderr, "error payload_len:%d buf_len:%d rlen:%d fd:%d\n", payload_len, len, rlen, fd);
+            _LOG_E("error payload_len:%d buf_len:%d rlen:%d fd:%d\n", payload_len, len, rlen, fd);
             return _ERR;
         }
         p += PACKET_HEAD_LEN;

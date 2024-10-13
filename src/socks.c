@@ -12,14 +12,7 @@
 #include <sys/time.h>
 
 #include "dns_resolver.h"
-
-#ifdef DEBUG
-#include "debug.h"
-#endif
-
-#ifndef _LOG
-#define _LOG(fmt, ...)
-#endif
+#include "sslog.h"
 
 #define SS5_VER 0x05U
 #define SS5_AUTH_NP_VER 0x01U
@@ -99,14 +92,6 @@ static void domain_cb(domain_req_t *req) {
             /* free_domain_req(req); */
             return;
         }
-
-        /*         int i;
-                printf("ack:");
-                for (i = 0; i < 7 + d_len + 1; i++) {
-                    printf("%.2X ", ack[i]);
-                }
-                printf("\n"); */
-
         int rt = nwpipe_send(pipe, src_fd, ack, 7 + d_len);
         if (rt == -1) {
             nwpipe_close_conn(pipe, src_fd);

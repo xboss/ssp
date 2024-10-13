@@ -16,18 +16,11 @@
 #include "cipher.h"
 #include "nwpipe.h"
 #include "ssev.h"
+#include "sslog.h"
 
 #ifdef SOCKS5
 #include "dns_resolver.h"
 #include "socks.h"
-#endif
-
-#ifdef DEBUG
-#include "debug.h"
-#endif
-
-#ifndef _LOG
-#define _LOG(fmt, ...)
 #endif
 
 #define NWPIPE_MODE_LOCAL 0
@@ -103,7 +96,7 @@ static void fill_conf(config_t *conf, const char *k, const char *v) {
 static int load_conf(const char *conf_file, config_t *conf) {
     FILE *fp;
     if ((fp = fopen(conf_file, "r")) == NULL) {
-        fprintf(stderr, "can't open config file %s\n", conf_file);
+        _LOG_E("can't open config file %s", conf_file);
         return -1;
     }
     char line[CONF_MAX_CHAR_PER_LINE] = {0};
@@ -149,18 +142,17 @@ static int load_conf(const char *conf_file, config_t *conf) {
 
 int check_config(config_t *conf) {
     if (conf->listen_port > 65535) {
-        fprintf(stderr, "Invalid listen_port:%u in configfile.\n", conf->listen_port);
+        _LOG_E("Invalid listen_port:%u in configfile.", conf->listen_port);
         return -1;
     }
     if (conf->mode == NWPIPE_MODE_LOCAL || conf->mode == NWPIPE_MODE_REMOTE) {
         if (conf->target_port > 65535) {
-            fprintf(stderr, "Invalid target_port:%u in configfile.\n", conf->target_port);
+            _LOG_E("Invalid target_port:%u in configfile.", conf->target_port);
             return -1;
         }
     }
     if (conf->mode != NWPIPE_MODE_LOCAL && conf->mode != NWPIPE_MODE_REMOTE && conf->mode != NWPIPE_MODE_SOCKS5) {
-        fprintf(stderr, "Invalid mode:%u in configfile. local mode is \"local\", remote mode is \"remote\".\n",
-                conf->mode);
+        _LOG_E("Invalid mode:%u in configfile. local mode is \"local\", remote mode is \"remote\".", conf->mode);
         return -1;
     }
     return 0;
@@ -244,8 +236,10 @@ static void signal_handler(int sn) {
 }
 
 int main(int argc, char const *argv[]) {
+    sslog_init(NULL);
+
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <config file>\n", argv[0]);
+        _LOG_E("Usage: %s <config file>", argv[0]);
         return 1;
     }
     memset(&g_conf, 0, sizeof(config_t));
@@ -258,7 +252,7 @@ int main(int argc, char const *argv[]) {
     pipe_accept_cb_t accept_cb = on_pipe_accept;
     g_loop = ssev_init();
     if (!g_loop) {
-        fprintf(stderr, "init loop error.\n");
+        _LOG_E("init loop error.");
         return 1;
     }
     ssev_set_ev_timeout(g_loop, g_conf.timeout);
@@ -269,7 +263,7 @@ int main(int argc, char const *argv[]) {
         recv_cb = on_socks_recv;
         accept_cb = on_socks_accept;
         if (init_domain_resolver(g_loop) != 0) {
-            fprintf(stderr, "init domain resolver error.\n");
+            _LOG_E("init domain resolver error.");
             return 1;
         }
     }
@@ -277,7 +271,7 @@ int main(int argc, char const *argv[]) {
 
     g_pipe = nwpipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, recv_cb, accept_cb);
     if (!g_pipe) {
-        fprintf(stderr, "init pipe error.\n");
+        _LOG_E("init pipe error.");
         ssev_free(g_loop);
 #ifdef SOCKS5
         free_domain_resolver(g_loop);
@@ -300,5 +294,6 @@ int main(int argc, char const *argv[]) {
 
     _LOG("Bye");
     printf("Bye\n");
+    sslog_free();
     return 0;
 }

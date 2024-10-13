@@ -10,13 +10,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#ifdef DEBUG
-#include "debug.h"
-#endif
-
-#ifndef _LOG
-#define _LOG(fmt, ...)
-#endif
+#include "sslog.h"
 
 #define NW_OK (0)
 #define NW_ERR (-1)
@@ -77,7 +71,7 @@ static int tcp_server_accept(network_t *nw) {
     while ((new_fd = accept(serv->listen_fd, (struct sockaddr *)&peer, &addrlen)) > 0) {
         /* setnonblocking(new_fd); */
         if (ssev_watch(nw->loop, SSEV_EV_READ | SSEV_EV_WRITE, new_fd, ssev_cb) != 0) {
-            fprintf(stderr, "watch event error. fd:%d\n", new_fd);
+            _LOG_E("watch event error. fd:%d\n", new_fd);
             close(new_fd);
             return NW_ERR;
         }
@@ -119,7 +113,7 @@ static int ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) {
                 _LOG("read EAGAIN fd:%d errno:%d", fd, errno);
                 break;
             } else if ((ret == -1) && !((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
-                /* fprintf(stderr, "read error, remove fd:%d errno:%d\n", fd, errno); */
+                /* _LOG_E( "read error, remove fd:%d errno:%d\n", fd, errno); */
                 _LOG("read error, remove fd:%d errno:%d", fd, errno);
                 /* ssev_unwatch(nw->loop, SSEV_EV_ALL, fd); */
                 nw->on_close(nw, fd);
@@ -302,7 +296,7 @@ int nw_tcp_connect(network_t *nw, const char *ip, unsigned short port) {
         } else {
             /* pending */
             if (ssev_watch(nw->loop, SSEV_EV_READ | SSEV_EV_WRITE, fd, ssev_cb) != 0) {
-                fprintf(stderr, "watch event error. fd:%d\n", fd);
+                _LOG_E("watch event error. fd:%d\n", fd);
                 close(fd);
                 return NW_ERR;
             }
@@ -312,7 +306,7 @@ int nw_tcp_connect(network_t *nw, const char *ip, unsigned short port) {
         /* connect ok */
         _LOG("tcp connect ok. fd: %d", fd);
         if (ssev_watch(nw->loop, SSEV_EV_READ | SSEV_EV_WRITE, fd, ssev_cb) != 0) {
-            fprintf(stderr, "watch event error. fd:%d\n", fd);
+            _LOG_E("watch event error. fd:%d\n", fd);
             close(fd);
             return NW_ERR;
         }

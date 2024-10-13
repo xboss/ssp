@@ -8,15 +8,8 @@
 #include <unistd.h>
 
 #include "ssev.h"
+#include "sslog.h"
 #include "uthash.h"
-
-#ifdef DEBUG
-#include "debug.h"
-#endif
-
-#ifndef _LOG
-#define _LOG(fmt, ...)
-#endif
 
 #define SSEV_OK 0
 #define SSEV_ERR -1
@@ -192,7 +185,7 @@ int ssev_run(ssev_loop_t *loop) {
                 EV_SET(&chg_e, fd, EVFILT_WRITE, EV_DISABLE, 0, 0, NULL);
                 kevent(loop->efd, &chg_e, 1, NULL, 0, NULL);
             } else {
-                fprintf(stderr, "kqueue event error. fd:%d event:%d\n", fd, events[i].filter);
+                _LOG_E("kqueue event error. fd:%d event:%d", fd, events[i].filter);
             }
         }
     }

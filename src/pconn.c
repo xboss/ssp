@@ -4,15 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "sslog.h"
 #include "uthash.h"
-
-#ifdef DEBUG
-#include "debug.h"
-#endif
-
-#ifndef _LOG
-#define _LOG(fmt, ...)
-#endif
 
 #define _OK 0
 #define _ERR -1
