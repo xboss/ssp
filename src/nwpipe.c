@@ -61,8 +61,6 @@ static int pack(int payload_len, const char *payload, char **buf) {
 }
 
 static int unpack(nwpipe_t *pipe, int fd, const char *buf, int len) {
-    /*     conn_t *conn = get_conn(pipe, fd);
-        if (!conn) return _ERR; */
     _LOG("uppack fd:%d len:%d", fd, len);
     const char *pending_buf = buf;
     const char *p = buf;
@@ -95,8 +93,6 @@ static int unpack(nwpipe_t *pipe, int fd, const char *buf, int len) {
             }
             break;
         }
-        /* assert(conn); */
-        /* assert(conn->fd > 0); */
         assert(p >= buf && p < buf + len);
         assert(p + payload_len <= buf + len);
         if (pipe->on_pipe_recv) pipe->on_pipe_recv(pipe, fd, p, payload_len);
@@ -116,7 +112,6 @@ static int unpack(nwpipe_t *pipe, int fd, const char *buf, int len) {
 static int flush_tcp_send(network_t *nw, int fd) {
     _LOG("flush_tcp_send fd:%d status:%d", fd, pconn_get_status(fd));
     if (pconn_get_status(fd) < PCONN_ST_ON) return _OK;
-
     _LOG("flush_tcp_send in. fd:%d", fd);
     stream_buf_t *snd_buf = pconn_get_snd_buf(fd);
     int buf_len = sb_get_size(snd_buf);
@@ -159,10 +154,6 @@ static int flush_tcp_send(network_t *nw, int fd) {
 
 static int on_recv(network_t *nw, int fd, const char *buf, int len) {
     _LOG("nwpipe on_recv fd:%d len:%d", fd, len);
-    /* if (pconn_get_status(fd) <= PCONN_ST_OFF) {
-        _LOG("connection does not exists. fd:%d", fd);
-        return _ERR;
-    } */
     if (pconn_get_status(fd) < PCONN_ST_ON) {
         _LOG("on_recv conn status not ON. fd:%d st:%d type:%d", fd, pconn_get_status(fd), pconn_get_type(fd));
         return _ERR;
@@ -202,21 +193,12 @@ static int on_close(network_t *nw, int fd) {
     _LOG("on close fd:%d", fd);
     nwpipe_t *pipe = (nwpipe_t *)nw_get_userdata(nw);
     nwpipe_close_conn(pipe, fd);
-    /* pconn_set_status(fd, PCONN_ST_OFF);
-    int cp_id = pconn_get_couple_id(fd);
-    if (cp_id > 0) {
-        _LOG("on close cp_fd:%d", cp_id);
-        pconn_set_status(cp_id, PCONN_ST_OFF);
-        nw_tcp_close(nw, cp_id);
-    }
-    pconn_free(fd, cp_id); */
     return _OK;
 }
 
 static int on_accept(network_t *nw, int fd) {
     _LOG("on_accept fd:%d", fd);
     nwpipe_t *pipe = (nwpipe_t *)nw_get_userdata(nw);
-    /* assert(ilist_exist(pipe->waiting_list, fd) != 0); */
     int rt = pconn_init(fd, PCONN_TYPE_FR, mstime());
     if (rt != 0) return _ERR;
     rt = pconn_set_status(fd, PCONN_ST_WAIT);
@@ -276,23 +258,19 @@ static int update(ssev_loop_t *loop, void *ud) {
         int rt, id, i, sz = ilist_size(pipe->waiting_list);
         for (i = 0; i < sz; i++) {
             rt = ilist_pop(pipe->waiting_list, &id);
-            if (rt == 0) {
-                _LOG("update conn fd:%d type:%d size:%d", id, pconn_get_type(id), sz);
-                if (pconn_get_status(id) != PCONN_ST_WAIT) continue;
-                assert(pconn_get_type(id) == PCONN_TYPE_FR);
-                ctime = pconn_get_ctime(id);
-                assert(ctime > 0);
-                if (now - ctime > DEF_CONNECT_TIMEOUT) {
-                    pconn_free(id);
-                    nw_tcp_close(nw, id);
-                    _LOG("update close conn fd:%d size:%d", id, sz);
-                } else {
-                    break;
-                }
+            if (rt != 0) break;
+            _LOG("update conn fd:%d type:%d size:%d", id, pconn_get_type(id), sz);
+            if (pconn_get_status(id) != PCONN_ST_WAIT) continue;
+            assert(pconn_get_type(id) == PCONN_TYPE_FR);
+            ctime = pconn_get_ctime(id);
+            assert(ctime > 0);
+            if (now - ctime > DEF_CONNECT_TIMEOUT) {
+                pconn_free(id);
+                nw_tcp_close(nw, id);
+                _LOG("update close conn fd:%d size:%d", id, sz);
             }
         }
     }
-
     return 0;
 }
 
@@ -327,9 +305,7 @@ nwpipe_t *nwpipe_init(ssev_loop_t *loop, int read_buf_size, const char *listen_i
     pipe->on_pipe_accept = on_pipe_accept;
     pipe->waiting_list = ilist_init();
     assert(pipe->waiting_list);
-
     ssev_set_update_cb(loop, update);
-
     return pipe;
 }
 static void free_close_cb(int id, void *u) {
@@ -364,27 +340,9 @@ static void close_conn(nwpipe_t *pipe, int id) {
 
 void nwpipe_close_conn(nwpipe_t *pipe, int id) {
     if (!pipe || id <= 0) return;
-    /* int st = pconn_get_status(id); */
     int cp_id = pconn_get_couple_id(id);
     close_conn(pipe, id);
     close_conn(pipe, cp_id);
-
-    /* int cp_st = 0;
-    if (cp_id > 0) cp_st = pconn_get_status(cp_id); */
-
-    /* if (st != PCONN_ST_WAIT) {
-        _LOG("close fd:%d", id);
-        nw_tcp_close(pipe->nw, id);
-    }
-
-    pconn_set_status(id, PCONN_ST_OFF);
-    if (cp_id > 0) pconn_set_status(cp_id, PCONN_ST_OFF);
-
-    if (cp_id > 0) {
-        _LOG("close cp fd:%d", cp_id);
-        nw_tcp_close(pipe->nw, cp_id);
-    }
-    pconn_free(id, cp_id); */
     _LOG("nwpipe_close_conn fd:%d cp_fd:%d ok.", id, cp_id);
 }
 
@@ -398,12 +356,9 @@ int nwpipe_connect(nwpipe_t *pipe, const char *ip, unsigned short port, int cp_f
         _LOG("tcp connect error");
         return _ERR;
     }
-    /* assert(ilist_exist(pipe->waiting_list, fd) != 0); */
     int rt;
     rt = pconn_init(fd, PCONN_TYPE_BK, mstime());
     assert(rt == 0);
-    /* rt = pconn_set_status(cp_fd, PCONN_ST_WAIT);
-    assert(rt == 0); */
     rt = pconn_set_status(fd, PCONN_ST_READY);
     assert(rt == 0);
     rt = pconn_set_is_packet(fd, is_packet);
@@ -437,7 +392,7 @@ int nwpipe_send(nwpipe_t *pipe, int fd, const char *buf, int len) {
     }
     rt = _OK;
     ssev_notify_write(pipe->loop, fd);
-    if (pconn_get_status(fd) >= PCONN_ST_ON && pconn_can_write(fd)) { /* TODO: */
+    if (pconn_get_status(fd) >= PCONN_ST_ON && pconn_can_write(fd)) {
         rt = flush_tcp_send(pipe->nw, fd);
     }
     _LOG("nwpipe_send buf fd:%d rt:%d", fd, rt);

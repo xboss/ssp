@@ -169,35 +169,3 @@ stream_buf_t *sb_init(const char *buf, int len) {
     }
     return sb;
 }
-
-/* ---------- test ----------- */
-/* int main(int argc, char const *argv[]) {
-#define TEST_SB_LEN 9999
-    char wbuf[TEST_SB_LEN];
-    int wlen = 1023;
-    int i;
-    for (i = 0; i < wlen; i++) {
-        wbuf[i] = 'a' + i % 26;
-    }
-    wbuf[0] = 'a';
-    wbuf[wlen - 1] = 'b';
-
-    stream_buf_t *sb = sb_init(wbuf, wlen);
-    assert(sb);
-
-    int wlen1 = 2222;
-    sb_write(sb, wbuf + wlen, wlen1);
-
-    _ALLOC(rbuf, char *, TEST_SB_LEN);
-    int rlen = sb_read_all(sb, rbuf, TEST_SB_LEN);
-
-    for (i = 0; i < rlen; i++) {
-        assert(rbuf[i] == wbuf[i]);
-    }
-
-    printf("test. %d\n", rlen);
-    sb_free(sb);
-
-    printf("test OK.\n");
-    return 0;
-} */
