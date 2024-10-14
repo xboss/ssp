@@ -1,4 +1,4 @@
-mode = local
+mode = local|remote|socks5
 listen_ip = 127.0.0.1
 listen_port = 2222
 target_ip = 127.0.0.1
@@ -7,4 +7,4 @@ password = yourpassword
 timeout = 1000
 read_buf_size = 0
 log_file = xxx.log
-log_level = DEBUG
+log_level = DEBUG|INFO|NOTICE|WARN|ERROR|FATAL
