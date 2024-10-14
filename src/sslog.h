@@ -10,7 +10,7 @@ typedef enum {
     SSLOG_LEVEL_FATAL
 } sslog_level;
 
-int sslog_init(char *file);
+int sslog_init(char *file, sslog_level level);
 void sslog_free();
 void sslog(sslog_level level, const char *fmt, ...);
 

@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 
 #define _OK 0
 #define _ERR -1
@@ -21,6 +22,7 @@
 
 struct sslog_s {
     FILE *fp;
+    sslog_level log_level;
     /* char *logfile; */
     /* char fmt[64]; */
 };
@@ -29,17 +31,16 @@ typedef struct sslog_s sslog_t;
 static char *level_desc[] = {"DEBUG", "INFO", "NOTICE", "WARN", "ERROR", "FATAL"};
 static sslog_t *g_log = NULL;
 
-int sslog_init(char *file) {
+int sslog_init(char *file, sslog_level log_level) {
     FILE *fp = stdout;
-    if (file) {
-        if ((fp = fopen(file, "a")) == NULL) {
-            fprintf(stderr, "can't open log file %s\n", file);
-            return _ERR;
-        }
+    if (file && (fp = fopen(file, "a")) == NULL) {
+        fprintf(stderr, "can't open log file %s\n", file);
+        fp = stdout;
     }
     _ALLOC(log, sslog_t *, sizeof(sslog_t));
     memset(log, 0, sizeof(sslog_t));
     log->fp = fp;
+    log->log_level = log_level;
     g_log = log;
     return _OK;
 }
@@ -58,6 +59,7 @@ void sslog(sslog_level level, const char *fmt, ...) {
         fprintf(stderr, "sslog error log.\n");
         return;
     }
+    if (level < g_log->log_level) return;
     struct timeval tv;
     gettimeofday(&tv, NULL);
     time_t t = time(NULL);

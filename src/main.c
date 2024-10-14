@@ -15,6 +15,7 @@
 
 #include "cipher.h"
 #include "nwpipe.h"
+#include "ssconf.h"
 #include "ssev.h"
 #include "sslog.h"
 
@@ -29,6 +30,15 @@
 
 #define CONF_MAX_CHAR_PER_LINE 1024
 
+#ifndef _ALLOC
+#define _ALLOC(_p, _type, _size)   \
+    (_p) = (_type)malloc((_size)); \
+    if (!(_p)) {                   \
+        perror("alloc error");     \
+        exit(1);                   \
+    }
+#endif
+
 struct config_s {
     char listen_ip[INET_ADDRSTRLEN + 1];
     unsigned short listen_port;
@@ -38,6 +48,8 @@ struct config_s {
     int mode;
     int timeout;
     int read_buf_size;
+    char *log_file;
+    int log_level;
 };
 typedef struct config_s config_t;
 
@@ -45,114 +57,91 @@ static config_t g_conf;
 static nwpipe_t *g_pipe;
 static ssev_loop_t *g_loop;
 
-/* ---------- config ---------- */
-static char *trim(char *str) {
-    char *p = str;
-    char *p1;
-    if (p) {
-        p1 = p + strlen(str) - 1;
-        while (*p && isspace(*p)) p++;
-        while (p1 > p && isspace(*p1)) *p1-- = '\0';
-    }
-    return p;
-}
-
-/* "mode", "listen_ip", "listen_port", "listen_ip", "listen_port", "password", "timeout", "read_buf_size" */
-static void fill_conf(config_t *conf, const char *k, const char *v) {
-    int len = strlen(v);
-    if (strcmp("mode", k) == 0) {
-        if (strcmp(v, "local") == 0) {
-            conf->mode = NWPIPE_MODE_LOCAL;
-        } else if (strcmp(v, "socks5") == 0) {
-            conf->mode = NWPIPE_MODE_SOCKS5;
-        } else {
-            conf->mode = NWPIPE_MODE_REMOTE;
-        }
-    } else if (strcmp("listen_ip", k) == 0) {
-        if (len <= INET_ADDRSTRLEN) {
-            memcpy(conf->listen_ip, v, len);
-        }
-    } else if (strcmp("listen_port", k) == 0) {
-        conf->listen_port = (unsigned short)atoi(v);
-    } else if (strcmp("target_ip", k) == 0) {
-        if (len <= INET_ADDRSTRLEN) {
-            memcpy(conf->target_ip, v, len);
-        }
-    } else if (strcmp("target_port", k) == 0) {
-        conf->target_port = (unsigned short)atoi(v);
-    } else if (strcmp("password", k) == 0) {
-        _LOG("before init key ......");
-#ifndef SOCKS5
-        _LOG("init key ......");
-        pwd2key(conf->key, CIPHER_KEY_LEN, v, strlen(v));
-#endif
-    } else if (strcmp("timeout", k) == 0) {
-        conf->timeout = atoi(v);
-    } else if (strcmp("read_buf_size", k) == 0) {
-        conf->read_buf_size = atoi(v);
-    }
-}
-
 static int load_conf(const char *conf_file, config_t *conf) {
-    FILE *fp;
-    if ((fp = fopen(conf_file, "r")) == NULL) {
-        _LOG_E("can't open config file %s", conf_file);
-        return -1;
-    }
-    char line[CONF_MAX_CHAR_PER_LINE] = {0};
-    char *k = NULL;
+    char *keys[] = {"mode",     "listen_ip", "listen_port",   "target_ip", "target_port",
+                    "password", "timeout",   "read_buf_size", "log_file",  "log_level"};
+    int keys_cnt = sizeof(keys) / sizeof(char *);
+    ssconf_t *cf = ssconf_init(keys, keys_cnt);
+    assert(cf);
+    int rt = ssconf_load(cf, conf_file);
+    if (rt != 0) return -1;
+    conf->log_level = SSLOG_LEVEL_ERROR;
     char *v = NULL;
-    char *d = "=";
-    while (fgets(line, CONF_MAX_CHAR_PER_LINE, fp) != NULL) {
-        line[CONF_MAX_CHAR_PER_LINE - 1] = '\0';
-        if (strlen(line) == 0) {
+    int i;
+    for (i = 0; i < keys_cnt; i++) {
+        v = ssconf_get_value(cf, keys[i]);
+        if (!v) {
+            printf("key: '%s' does not exists in config file '%s'.\n", keys[i], conf_file);
             continue;
         }
-        char *p = trim(line);
-        if (*p == '#') {
-            continue;
+        int len = strlen(v);
+        if (strcmp("mode", keys[i]) == 0) {
+            if (strcmp(v, "local") == 0) {
+                conf->mode = NWPIPE_MODE_LOCAL;
+            } else if (strcmp(v, "socks5") == 0) {
+                conf->mode = NWPIPE_MODE_SOCKS5;
+            } else {
+                conf->mode = NWPIPE_MODE_REMOTE;
+            }
+        } else if (strcmp("listen_ip", keys[i]) == 0) {
+            if (len <= INET_ADDRSTRLEN) {
+                memcpy(conf->listen_ip, v, len);
+            }
+        } else if (strcmp("listen_port", keys[i]) == 0) {
+            conf->listen_port = (unsigned short)atoi(v);
+        } else if (strcmp("target_ip", keys[i]) == 0) {
+            if (len <= INET_ADDRSTRLEN) {
+                memcpy(conf->target_ip, v, len);
+            }
+        } else if (strcmp("target_port", keys[i]) == 0) {
+            conf->target_port = (unsigned short)atoi(v);
+        } else if (strcmp("password", keys[i]) == 0) {
+#ifndef SOCKS5
+            pwd2key(conf->key, CIPHER_KEY_LEN, v, strlen(v));
+#endif
+        } else if (strcmp("timeout", keys[i]) == 0) {
+            conf->timeout = atoi(v);
+        } else if (strcmp("read_buf_size", keys[i]) == 0) {
+            conf->read_buf_size = atoi(v);
+        } else if (strcmp("log_file", keys[i]) == 0) {
+            _ALLOC(conf->log_file, char *, len + 1);
+            memset(conf->log_file, 0, len + 1);
+            memcpy(conf->log_file, v, len);
+        } else if (strcmp("log_level", keys[i]) == 0) {
+            if (strcmp(v, "DEBUG") == 0) {
+                conf->log_level = SSLOG_LEVEL_DEBUG;
+            } else if (strcmp(v, "INFO") == 0) {
+                conf->log_level = SSLOG_LEVEL_INFO;
+            } else if (strcmp(v, "NOTICE") == 0) {
+                conf->log_level = SSLOG_LEVEL_NOTICE;
+            } else if (strcmp(v, "WARN") == 0) {
+                conf->log_level = SSLOG_LEVEL_WARN;
+            } else if (strcmp(v, "ERROR") == 0) {
+                conf->log_level = SSLOG_LEVEL_ERROR;
+            } else {
+                conf->log_level = SSLOG_LEVEL_FATAL;
+            }
         }
-        k = strtok(p, d);
-        if (k == NULL) {
-            continue;
-        }
-        v = strtok(NULL, d);
-        if (v == NULL) {
-            continue;
-        }
-        k = trim(k);
-        v = trim(v);
-        fill_conf(conf, k, v);
+        printf("%s : %s\n", keys[i], v);
     }
-    fclose(fp);
-
-    _LOG("---config---");
-    _LOG("mode:%d", conf->mode);
-    _LOG("listen_ip:%s", conf->listen_ip);
-    _LOG("listen_port:%u", conf->listen_port);
-    _LOG("target_ip:%s", conf->target_ip);
-    _LOG("target_port:%u", conf->target_port);
-    _LOG("timeout:%d", conf->timeout);
-    _LOG("read_buf_size:%d", conf->read_buf_size);
-    /* _LOG("key:%s", conf->key); */
-    _LOG("------------");
-
+    ssconf_free(cf);
+    printf("------------\n");
     return 0;
 }
 
 int check_config(config_t *conf) {
     if (conf->listen_port > 65535) {
-        _LOG_E("Invalid listen_port:%u in configfile.", conf->listen_port);
+        fprintf(stderr, "Invalid listen_port:%u in configfile.\n", conf->listen_port);
         return -1;
     }
     if (conf->mode == NWPIPE_MODE_LOCAL || conf->mode == NWPIPE_MODE_REMOTE) {
         if (conf->target_port > 65535) {
-            _LOG_E("Invalid target_port:%u in configfile.", conf->target_port);
+            fprintf(stderr, "Invalid target_port:%u in configfile.\n", conf->target_port);
             return -1;
         }
     }
     if (conf->mode != NWPIPE_MODE_LOCAL && conf->mode != NWPIPE_MODE_REMOTE && conf->mode != NWPIPE_MODE_SOCKS5) {
-        _LOG_E("Invalid mode:%u in configfile. local mode is \"local\", remote mode is \"remote\".", conf->mode);
+        fprintf(stderr, "Invalid mode:%u in configfile. local mode is 'local', remote mode is 'remote'.\n", conf->mode);
         return -1;
     }
     return 0;
@@ -236,18 +225,16 @@ static void signal_handler(int sn) {
 }
 
 int main(int argc, char const *argv[]) {
-    sslog_init(NULL);
-
     if (argc < 2) {
-        _LOG_E("Usage: %s <config file>", argv[0]);
+        fprintf(stderr, "Usage: %s <config file>\n", argv[0]);
         return 1;
     }
     memset(&g_conf, 0, sizeof(config_t));
     int rt = load_conf(argv[1], &g_conf);
-    if (rt != 0) {
-        return 1;
-    }
+    if (rt != 0) return 1;
     if (check_config(&g_conf) != 0) return 1;
+    sslog_init(g_conf.log_file, g_conf.log_level);
+    if (g_conf.log_file) free(g_conf.log_file);
     pipe_recv_cb_t recv_cb = on_pipe_recv;
     pipe_accept_cb_t accept_cb = on_pipe_accept;
     g_loop = ssev_init();
@@ -256,7 +243,6 @@ int main(int argc, char const *argv[]) {
         return 1;
     }
     ssev_set_ev_timeout(g_loop, g_conf.timeout);
-
 #ifdef SOCKS5
     if (g_conf.mode == NWPIPE_MODE_SOCKS5) {
         _LOG("socks5 mode...");
@@ -284,7 +270,6 @@ int main(int argc, char const *argv[]) {
     action.sa_handler = signal_handler;
     sigaction(SIGPIPE, &action, NULL);
     sigaction(SIGINT, &action, NULL);
-    printf("Run...\n");
     ssev_run(g_loop);
 #ifdef SOCKS5
     free_domain_resolver(g_loop);
@@ -293,7 +278,6 @@ int main(int argc, char const *argv[]) {
     ssev_free(g_loop);
 
     _LOG("Bye");
-    printf("Bye\n");
     sslog_free();
     return 0;
 }
