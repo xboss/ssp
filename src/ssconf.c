@@ -52,6 +52,7 @@ static void fill_conf(ssconf_t *conf, const char *k, const char *v) {
         if (strcmp(k, conf->items[i]->key) == 0) {
             vl = strlen(v);
             _ALLOC(tv, char *, vl + 1);
+            memset(tv, 0, vl + 1);
             memcpy(tv, v, vl);
             conf->items[i]->value = tv;
         }
@@ -145,6 +146,7 @@ ssconf_t *ssconf_init(char *keys[], int cnt) {
     for (i = 0; i < cnt; i++) {
         if (!keys[i] || strlen(keys[i]) <= 0) continue;
         _ALLOC(item, ssconf_item_t *, sizeof(ssconf_item_t));
+        memset(item, 0, sizeof(ssconf_item_t));
         item->key = keys[i];
         conf->items[i] = item;
     }
