@@ -71,17 +71,19 @@ static int load_conf(const char *conf_file, config_t *conf) {
     for (i = 0; i < keys_cnt; i++) {
         v = ssconf_get_value(cf, keys[i]);
         if (!v) {
-            printf("key: '%s' does not exists in config file '%s'.\n", keys[i], conf_file);
+            printf("'%s' does not exists in config file '%s'.\n", keys[i], conf_file);
             continue;
         }
         int len = strlen(v);
         if (strcmp("mode", keys[i]) == 0) {
             if (strcmp(v, "local") == 0) {
                 conf->mode = NWPIPE_MODE_LOCAL;
+            } else if (strcmp(v, "remote") == 0) {
+                conf->mode = NWPIPE_MODE_REMOTE;
             } else if (strcmp(v, "socks5") == 0) {
                 conf->mode = NWPIPE_MODE_SOCKS5;
             } else {
-                conf->mode = NWPIPE_MODE_REMOTE;
+                conf->mode = -1;
             }
         } else if (strcmp("listen_ip", keys[i]) == 0) {
             if (len <= INET_ADDRSTRLEN) {
@@ -141,7 +143,7 @@ int check_config(config_t *conf) {
         }
     }
     if (conf->mode != NWPIPE_MODE_LOCAL && conf->mode != NWPIPE_MODE_REMOTE && conf->mode != NWPIPE_MODE_SOCKS5) {
-        fprintf(stderr, "Invalid mode:%u in configfile. local mode is 'local', remote mode is 'remote'.\n", conf->mode);
+        fprintf(stderr, "Invalid mode:%d in configfile. local mode is 'local', remote mode is 'remote'.\n", conf->mode);
         return -1;
     }
     return 0;
