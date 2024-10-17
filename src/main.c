@@ -14,7 +14,7 @@
 #include <unistd.h>
 
 #include "cipher.h"
-#include "nwpipe.h"
+#include "sspipe.h"
 #include "ssconf.h"
 #include "ssev.h"
 #include "sslog.h"
@@ -24,9 +24,9 @@
 #include "socks.h"
 #endif
 
-#define NWPIPE_MODE_LOCAL 0
-#define NWPIPE_MODE_REMOTE 1
-#define NWPIPE_MODE_SOCKS5 2
+#define SSPIPE_MODE_LOCAL 0
+#define SSPIPE_MODE_REMOTE 1
+#define SSPIPE_MODE_SOCKS5 2
 
 #define CONF_MAX_CHAR_PER_LINE 1024
 
@@ -54,7 +54,7 @@ struct config_s {
 typedef struct config_s config_t;
 
 static config_t g_conf;
-static nwpipe_t *g_pipe;
+static sspipe_t *g_pipe;
 static ssev_loop_t *g_loop;
 
 static int load_conf(const char *conf_file, config_t *conf) {
@@ -77,11 +77,11 @@ static int load_conf(const char *conf_file, config_t *conf) {
         int len = strlen(v);
         if (strcmp("mode", keys[i]) == 0) {
             if (strcmp(v, "local") == 0) {
-                conf->mode = NWPIPE_MODE_LOCAL;
+                conf->mode = SSPIPE_MODE_LOCAL;
             } else if (strcmp(v, "remote") == 0) {
-                conf->mode = NWPIPE_MODE_REMOTE;
+                conf->mode = SSPIPE_MODE_REMOTE;
             } else if (strcmp(v, "socks5") == 0) {
-                conf->mode = NWPIPE_MODE_SOCKS5;
+                conf->mode = SSPIPE_MODE_SOCKS5;
             } else {
                 conf->mode = -1;
             }
@@ -136,13 +136,13 @@ int check_config(config_t *conf) {
         fprintf(stderr, "Invalid listen_port:%u in configfile.\n", conf->listen_port);
         return -1;
     }
-    if (conf->mode == NWPIPE_MODE_LOCAL || conf->mode == NWPIPE_MODE_REMOTE) {
+    if (conf->mode == SSPIPE_MODE_LOCAL || conf->mode == SSPIPE_MODE_REMOTE) {
         if (conf->target_port > 65535) {
             fprintf(stderr, "Invalid target_port:%u in configfile.\n", conf->target_port);
             return -1;
         }
     }
-    if (conf->mode != NWPIPE_MODE_LOCAL && conf->mode != NWPIPE_MODE_REMOTE && conf->mode != NWPIPE_MODE_SOCKS5) {
+    if (conf->mode != SSPIPE_MODE_LOCAL && conf->mode != SSPIPE_MODE_REMOTE && conf->mode != SSPIPE_MODE_SOCKS5) {
         fprintf(stderr, "Invalid mode:%d in configfile. local mode is 'local', remote mode is 'remote'.\n", conf->mode);
         return -1;
     }
@@ -151,7 +151,7 @@ int check_config(config_t *conf) {
 
 /* ---------- pipe callback ---------- */
 
-static int on_pipe_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
+static int on_pipe_recv(sspipe_t *pipe, int fd, const char *buf, int len) {
     int cp_fd = pconn_get_couple_id(fd);
     if (cp_fd <= 0) {
         _LOG("couple does not exists. fd:%d", fd);
@@ -174,23 +174,23 @@ static int on_pipe_recv(nwpipe_t *pipe, int fd, const char *buf, int len) {
         assert(cipher_len % 16 == 0);
     }
 #endif
-    int rt = nwpipe_send(pipe, cp_fd, cihper, cipher_len);
-    _LOG("nwpipe_send rt:%d", rt);
+    int rt = sspipe_send(pipe, cp_fd, cihper, cipher_len);
+    _LOG("sspipe_send rt:%d", rt);
 
     if (cihper && cihper != plain) free(cihper);
     if (plain && plain != buf) free(plain);
 
     if (rt != 0) {
-        nwpipe_close_conn(pipe, fd);
+        sspipe_close_conn(pipe, fd);
         return -1;
     }
     return 0;
 }
 
-static int on_pipe_accept(nwpipe_t *pipe, int fd) {
+static int on_pipe_accept(sspipe_t *pipe, int fd) {
     int is_cp_secret = 0;
     int is_cp_packet = 0;
-    if (g_conf.mode == NWPIPE_MODE_LOCAL) {
+    if (g_conf.mode == SSPIPE_MODE_LOCAL) {
         pconn_set_is_packet(fd, 0);
         pconn_set_is_secret(fd, 0);
         is_cp_secret = 1;
@@ -201,9 +201,9 @@ static int on_pipe_accept(nwpipe_t *pipe, int fd) {
         is_cp_secret = 0;
         is_cp_packet = 0;
     }
-    int cp_fd = nwpipe_connect(pipe, g_conf.target_ip, g_conf.target_port, fd, is_cp_secret, is_cp_packet);
+    int cp_fd = sspipe_connect(pipe, g_conf.target_ip, g_conf.target_port, fd, is_cp_secret, is_cp_packet);
     if (cp_fd <= 0) {
-        nwpipe_close_conn(pipe, fd);
+        sspipe_close_conn(pipe, fd);
     }
     return 0;
 }
@@ -246,7 +246,7 @@ int main(int argc, char const *argv[]) {
     }
     ssev_set_ev_timeout(g_loop, g_conf.timeout);
 #ifdef SOCKS5
-    if (g_conf.mode == NWPIPE_MODE_SOCKS5) {
+    if (g_conf.mode == SSPIPE_MODE_SOCKS5) {
         _LOG("socks5 mode...");
         recv_cb = on_socks_recv;
         accept_cb = on_socks_accept;
@@ -257,7 +257,7 @@ int main(int argc, char const *argv[]) {
     }
 #endif
 
-    g_pipe = nwpipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, recv_cb, accept_cb);
+    g_pipe = sspipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, recv_cb, accept_cb);
     if (!g_pipe) {
         _LOG_E("init pipe error.");
         ssev_free(g_loop);
@@ -276,7 +276,7 @@ int main(int argc, char const *argv[]) {
 #ifdef SOCKS5
     free_domain_resolver(g_loop);
 #endif
-    nwpipe_free(g_pipe);
+    sspipe_free(g_pipe);
     ssev_free(g_loop);
 
     _LOG("Bye");
