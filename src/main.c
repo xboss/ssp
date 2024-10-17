@@ -28,8 +28,6 @@
 #define SSPIPE_MODE_REMOTE 1
 #define SSPIPE_MODE_SOCKS5 2
 
-#define CONF_MAX_CHAR_PER_LINE 1024
-
 #ifndef _ALLOC
 #define _ALLOC(_p, _type, _size)   \
     (_p) = (_type)malloc((_size)); \
@@ -131,7 +129,7 @@ static int load_conf(const char *conf_file, config_t *conf) {
     return 0;
 }
 
-int check_config(config_t *conf) {
+static int check_config(config_t *conf) {
     if (conf->listen_port > 65535) {
         fprintf(stderr, "Invalid listen_port:%u in configfile.\n", conf->listen_port);
         return -1;
