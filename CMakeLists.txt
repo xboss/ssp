@@ -18,7 +18,7 @@ aux_source_directory(${PROJECT_SOURCE_DIR}/src DIR_SRCS)
 add_executable(ssp ${DIR_SRCS})
 target_link_libraries(ssp ssl)
 target_link_libraries(ssp crypto)
-#target_link_libraries(ssp pthread)
+target_link_libraries(ssp pthread)
 
 ############# socks5 server (linux only) #############
 if(${CMAKE_SYSTEM_NAME} STREQUAL Linux)
