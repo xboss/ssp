@@ -79,7 +79,7 @@ static void read_kv(ssconf_t *conf, char *line) {
 int ssconf_load(ssconf_t *conf, const char *file) {
     FILE *fp;
     if ((fp = fopen(file, "r")) == NULL) {
-        fprintf(stderr, "can't open config file %s", file);
+        fprintf(stderr, "can't open config file %s\n", file);
         return _ERR;
     }
     stream_buf_t *sb = sb_init(NULL, 0);
