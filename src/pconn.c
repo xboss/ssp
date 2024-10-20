@@ -11,11 +11,11 @@
 #define _ERR -1
 
 #ifndef _ALLOC
-#define _ALLOC(_p, _type, _size)        \
-    _type(_p) = (_type)malloc((_size)); \
-    if (!(_p)) {                        \
-        perror("alloc error");          \
-        exit(1);                        \
+#define _ALLOC(_p, _type, _size)   \
+    (_p) = (_type)malloc((_size)); \
+    if (!(_p)) {                   \
+        perror("alloc error");     \
+        exit(1);                   \
     }
 #endif
 
@@ -60,6 +60,14 @@ int pconn_init(int id, int type, uint64_t ctime) {
     if (id < 0 || (type != PCONN_TYPE_FR && type != PCONN_TYPE_BK)) {
         return _ERR;
     }
+
+    /* TODO: debug */
+    pconn_t *c = NULL;
+    HASH_FIND_INT(g_conn_tb, &id, c);
+    if (c) {
+        _LOG_E("pconn_init conn exsits, fd:%d cp_id:%d type:%d status:%d", c->id, c->cp_id, c->type, c->status);
+    }
+
     _ALLOC(c, pconn_t *, sizeof(pconn_t));
     memset(c, 0, sizeof(pconn_t));
     c->id = id;
