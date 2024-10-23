@@ -7,13 +7,22 @@
 #include <sys/time.h>
 
 #include "ilist.h"
-#include "ssnet.h"
 #include "sslog.h"
+#include "ssnet.h"
 #include "stream_buf.h"
 #include "uthash.h"
 
 #define _OK 0
 #define _ERR -1
+
+#ifndef _ALLOC
+#define _ALLOC(_p, _type, _size)   \
+    (_p) = (_type)malloc((_size)); \
+    if (!(_p)) {                   \
+        perror("alloc error");     \
+        exit(1);                   \
+    }
+#endif
 
 #define DEF_CONNECT_TIMEOUT (1000u * 5u)
 
@@ -42,11 +51,8 @@ static int pack(int payload_len, const char *payload, char **buf) {
     if (payload_len <= 0 || !payload) {
         return 0;
     }
-    *buf = (char *)malloc(payload_len + PACKET_HEAD_LEN);
-    if (!*buf) {
-        perror("allocate memory error");
-        return -1;
-    }
+    _ALLOC(*buf, char *, payload_len + PACKET_HEAD_LEN);
+    memset(*buf, 0, payload_len + PACKET_HEAD_LEN);
     int n_payload_len = htonl(payload_len);
     memcpy(*buf, &n_payload_len, PACKET_HEAD_LEN);
     memcpy(*buf + PACKET_HEAD_LEN, payload, payload_len);
@@ -60,6 +66,7 @@ static int unpack(sspipe_t *pipe, int fd, const char *buf, int len) {
     int payload_len = 0;
     int rlen = len;
     stream_buf_t *rcv_buf = pconn_get_rcv_buf(fd);
+    assert(rcv_buf);
     while (rlen > 0) {
         if (rlen < PACKET_HEAD_LEN) {
             assert(pending_buf);
@@ -112,7 +119,8 @@ static int flush_tcp_send(ssnet_t *net, int fd) {
         _LOG("flush_tcp_send no buf fd:%d", fd);
         return _OK;
     }
-    char *buf = (char *)malloc(buf_len);
+    char *_ALLOC(buf, char *, buf_len);
+    memset(buf, 0, buf_len);
     if (!buf) {
         perror("allocate memory error");
         return _ERR;
@@ -159,7 +167,7 @@ static int on_recv(ssnet_t *net, int fd, const char *buf, int len, struct sockad
     if (rcv_buf_sz > 0) {
         _LOG("sspipe on_recv consume receiving buf fd:%d size:%d", fd, rcv_buf_sz);
         r_buf_len = rcv_buf_sz + len;
-        r_buf = (char *)malloc(r_buf_len);
+        _ALLOC(r_buf, char *, r_buf_len);
         if (!r_buf) {
             perror("allocate memory error");
             return _ERR;
@@ -267,16 +275,18 @@ static int update(ssev_loop_t *loop, void *ud) {
     return 0;
 }
 
+static void free_close_cb(int id, void *u) {
+    ssnet_t *net = (ssnet_t *)u;
+    assert(net);
+    ssnet_tcp_close(net, id);
+}
+
 /* ---------- api ----------- */
 
 sspipe_t *sspipe_init(ssev_loop_t *loop, int read_buf_size, const char *listen_ip, unsigned short listen_port,
                       pipe_recv_cb_t on_pipe_recv, pipe_accept_cb_t on_pipe_accept) {
     if (!listen_ip || listen_port <= 0) return NULL;
-    sspipe_t *pipe = (sspipe_t *)malloc(sizeof(sspipe_t));
-    if (!pipe) {
-        perror("allocate memory error");
-        return NULL;
-    }
+    sspipe_t *_ALLOC(pipe, sspipe_t *, sizeof(sspipe_t));
     memset(pipe, 0, sizeof(sspipe_t));
     pipe->net = ssnet_init(loop, read_buf_size);
     if (!pipe->net) {
@@ -300,11 +310,6 @@ sspipe_t *sspipe_init(ssev_loop_t *loop, int read_buf_size, const char *listen_i
     assert(pipe->waiting_list);
     ssev_set_update_cb(loop, update);
     return pipe;
-}
-static void free_close_cb(int id, void *u) {
-    ssnet_t *net = (ssnet_t *)u;
-    assert(net);
-    ssnet_tcp_close(net, id);
 }
 
 void sspipe_free(sspipe_t *pipe) {
