@@ -61,20 +61,16 @@ static int pack(int payload_len, const char *payload, char **buf) {
 
 static int unpack(sspipe_t *pipe, int fd, const char *buf, int len) {
     _LOG("uppack fd:%d len:%d", fd, len);
-    const char *pending_buf = buf;
-    const char *p = buf;
-    int payload_len = 0;
-    int rlen = len;
+    const char *pending_buf = buf, *p = buf;
+    int payload_len = 0, rlen = len, rt;
     stream_buf_t *rcv_buf = pconn_get_rcv_buf(fd);
     assert(rcv_buf);
     while (rlen > 0) {
         if (rlen < PACKET_HEAD_LEN) {
             assert(pending_buf);
             assert(rlen > 0);
-            if (sb_write(rcv_buf, pending_buf, rlen) != 0) {
-                _LOG("unpack sb_write error 1");
-                return _ERR;
-            }
+            rt = sb_write(rcv_buf, pending_buf, rlen);
+            assert(rt == 0);
             break;
         }
         payload_len = ntohl(*(uint32_t *)(p));
@@ -87,10 +83,8 @@ static int unpack(sspipe_t *pipe, int fd, const char *buf, int len) {
         if (rlen < payload_len + PACKET_HEAD_LEN) {
             assert(pending_buf);
             assert(rlen > 0);
-            if (sb_write(rcv_buf, pending_buf, rlen) != 0) {
-                _LOG("unpack sb_write error 2");
-                return _ERR;
-            }
+            rt = sb_write(rcv_buf, pending_buf, rlen);
+            assert(rt == 0);
             break;
         }
         assert(p >= buf && p < buf + len);
@@ -168,23 +162,18 @@ static int on_recv(ssnet_t *net, int fd, const char *buf, int len, struct sockad
         _LOG("sspipe on_recv consume receiving buf fd:%d size:%d", fd, rcv_buf_sz);
         r_buf_len = rcv_buf_sz + len;
         _ALLOC(r_buf, char *, r_buf_len);
-        if (!r_buf) {
-            perror("allocate memory error");
-            return _ERR;
-        }
-        if (sb_read_all(rcv_buf, r_buf, r_buf_len) != rcv_buf_sz) {
-            _LOG("on_recv sb_read_all error");
-            free(r_buf);
-            return _ERR;
-        }
+        memset(r_buf, 0, r_buf_len);
+        rt = sb_read_all(rcv_buf, r_buf, r_buf_len);
+        assert(rt == rcv_buf_sz);
         memcpy(r_buf + rcv_buf_sz, buf, len);
     }
     sspipe_t *pipe = (sspipe_t *)ssnet_get_userdata(net);
     if (pconn_is_packet(fd)) {
         /* unpack */
         rt = unpack(pipe, fd, r_buf, r_buf_len);
+        if (rt != _OK) sspipe_close_conn(pipe, fd);
     } else {
-        if (pipe->on_pipe_recv) pipe->on_pipe_recv(pipe, fd, r_buf, r_buf_len);
+        if (pipe->on_pipe_recv) rt = pipe->on_pipe_recv(pipe, fd, r_buf, r_buf_len);
     }
     if (r_buf != buf) free(r_buf);
     return rt;
@@ -338,6 +327,7 @@ static void close_conn(sspipe_t *pipe, int id) {
 
 void sspipe_close_conn(sspipe_t *pipe, int id) {
     if (!pipe || id <= 0) return;
+    if (pconn_get_status(id) == 0) return;
     int cp_id = pconn_get_couple_id(id);
     close_conn(pipe, id);
     close_conn(pipe, cp_id);
