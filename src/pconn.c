@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "sslog.h"
 #include "uthash.h"
@@ -24,6 +25,10 @@
     c->snd_buf = NULL;                     \
     sb_free(c->rcv_buf);                   \
     c->rcv_buf = NULL;                     \
+    if (c->status) {                       \
+        free(c->status);                   \
+        c->status = NULL;                  \
+    }                                      \
     if (g_conn_tb) HASH_DEL(g_conn_tb, c); \
     free(c);                               \
     c = NULL
@@ -32,49 +37,80 @@
     if (id <= 0) {                       \
         _code_block                      \
     }                                    \
-    pconn_t *c = NULL;                   \
-    HASH_FIND_INT(g_conn_tb, &id, c);    \
+    pconn_t* c = get_conn(id);           \
     if (!c) {                            \
         _code_block                      \
     }
+
+typedef struct {
+    pconn_st_t fr_st;
+    pconn_st_t bk_st;
+    pconn_st_t st;
+} status_t;
 
 struct pconn_s {
     int id;
     int cp_id;
     int is_secret;
     int is_packet;
-    int status;
+    status_t* status;
     int type;
     int ex;
     int can_write;
     uint64_t ctime;
-    stream_buf_t *snd_buf;
-    stream_buf_t *rcv_buf;
+    stream_buf_t* snd_buf;
+    stream_buf_t* rcv_buf;
     UT_hash_handle hh;
 };
 typedef struct pconn_s pconn_t;
 
-static pconn_t *g_conn_tb = NULL;
+static pconn_t* g_conn_tb = NULL;
 
-int pconn_init(int id, int type, uint64_t ctime) {
+static uint64_t mstime() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t millisecond = (tv.tv_sec * 1000000l + tv.tv_usec) / 1000l;
+    return millisecond;
+}
+
+static pconn_t* get_conn(int id) {
+    if (id < 0) return NULL;
+    pconn_t* c = NULL;
+    HASH_FIND_INT(g_conn_tb, &id, c);
+    return c;
+}
+
+int pconn_init(int id, pconn_type_t type) {
     if (id < 0 || (type != PCONN_TYPE_FR && type != PCONN_TYPE_BK)) {
         return _ERR;
     }
-
     /* TODO: debug */
-    pconn_t *c = NULL;
-    HASH_FIND_INT(g_conn_tb, &id, c);
+    pconn_t* c = get_conn(id);
     if (c) {
         _LOG_E("pconn_init conn exsits, fd:%d cp_id:%d type:%d status:%d", c->id, c->cp_id, c->type, c->status);
     }
 
-    _ALLOC(c, pconn_t *, sizeof(pconn_t));
+    status_t* status = NULL;
+    if (type == PCONN_TYPE_BK) {
+        pconn_t* cp = get_conn(id);
+        assert(cp);
+        assert(cp->status);
+        status = cp->status;
+    } else {
+        _ALLOC(status, status_t*, sizeof(status_t));
+    }
+    status->fr_st = PCONN_ST_OFF;
+    status->bk_st = PCONN_ST_OFF;
+    status->st = PCONN_ST_OFF;
+
+    _ALLOC(c, pconn_t*, sizeof(pconn_t));
     memset(c, 0, sizeof(pconn_t));
     c->id = id;
     c->type = type;
-    c->ctime = ctime;
+    c->ctime = mstime;
     c->rcv_buf = sb_init(NULL, 0);
     c->snd_buf = sb_init(NULL, 0);
+    c->status = status;
     HASH_ADD_INT(g_conn_tb, id, c);
     _LOG("pconn_init ok. id:%d", id);
     return _OK;
@@ -82,28 +118,14 @@ int pconn_init(int id, int type, uint64_t ctime) {
 
 void pconn_free(int id /* , int cp_id */) {
     if (id <= 0) return;
-    pconn_t *c = NULL;
-    HASH_FIND_INT(g_conn_tb, &id, c);
+    pconn_t* c = get_conn(id);
     if (c) {
-        /* if (cp_id <= 0) cp_id = c->cp_id; */
-        /* assert(cp_id == c->cp_id); */
         _FREE_PCONN_ITEM;
         _LOG("pconn_free id:%d", id);
     }
-    /*     if (cp_id <= 0) {
-            return;
-        }
-        HASH_FIND_INT(g_conn_tb, &cp_id, c);
-        if (c) {
-            assert(id == c->cp_id);
-            _FREE_PCONN_ITEM;
-            _LOG("pconn_free cp_id:%d", cp_id);
-        }
-    _LOG("pconn_free ok. id:%d cp_id:%d", id, cp_id);
-    */
 }
 
-void pconn_free_all(void *u, void (*fn)(int id, void *u)) {
+void pconn_free_all(void* u, void (*fn)(int id, void* u)) {
     if (!g_conn_tb) return;
     pconn_t *c, *tmp;
     HASH_ITER(hh, g_conn_tb, c, tmp) {
@@ -114,7 +136,27 @@ void pconn_free_all(void *u, void (*fn)(int id, void *u)) {
     _LOG("pconn_free_all ok.");
 }
 
-int pconn_get_type(int id) {
+int pconn_chg_status(int id, pconn_st_t status) {
+    pconn_t* c = get_conn(id);
+    if (!c) return _ERR;
+    if (c->type == PCONN_TYPE_FR)
+        c->status->fr_st = status;
+    else
+        c->status->bk_st = status;
+    if (c->status->fr_st == PCONN_ST_OFF || c->status->bk_st == PCONN_ST_OFF)
+        c->status->st = PCONN_ST_OFF;
+    else
+        c->status->st = PCONN_ST_ON;
+    return _OK;
+}
+
+pconn_st_t pconn_get_status(int id) {
+    _CHECK_PCONN_EXISTS(return PCONN_ST_OFF;)
+    assert(c->status);
+    return c->status->st;
+}
+
+pconn_type_t pconn_get_type(int id) {
     _CHECK_PCONN_EXISTS(return 0;)
     return c->type;
 }
@@ -131,20 +173,6 @@ int pconn_set_couple_id(int id, int cp_id) {
     return _OK;
 }
 
-int pconn_get_status(int id) {
-    _CHECK_PCONN_EXISTS(return 0;)
-    return c->status;
-}
-
-int pconn_set_status(int id, int status) {
-    if (status != PCONN_ST_OFF && status != PCONN_ST_READY && status != PCONN_ST_ON && status != PCONN_ST_WAIT) {
-        return _ERR;
-    }
-    _CHECK_PCONN_EXISTS(return _ERR;)
-    c->status = status;
-    return _OK;
-}
-
 int pconn_get_ex(int id) {
     _CHECK_PCONN_EXISTS(return 0;)
     return c->ex;
@@ -156,12 +184,12 @@ int pconn_set_ex(int id, int ex) {
     return _OK;
 }
 
-stream_buf_t *pconn_get_snd_buf(int id) {
+stream_buf_t* pconn_get_snd_buf(int id) {
     _CHECK_PCONN_EXISTS(return NULL;)
     return c->snd_buf;
 }
 
-stream_buf_t *pconn_get_rcv_buf(int id) {
+stream_buf_t* pconn_get_rcv_buf(int id) {
     _CHECK_PCONN_EXISTS(return NULL;)
     return c->rcv_buf;
 }
@@ -203,6 +231,31 @@ uint64_t pconn_get_ctime(int id) {
     _CHECK_PCONN_EXISTS(return 0lu;)
     return c->ctime;
 }
+
+int pconn_send(int id, const char *buf, int len){
+    pconn_t *c = get_conn(id);
+    if (!c) return _ERR;
+    assert(c->snd_buf);
+    int rt = sb_write(c->snd_buf, buf, len);
+    assert(rt);
+    return _OK;
+}
+
+int pconn_rcv(int id, const char *buf, int len){
+    pconn_t *c = get_conn(id);
+    if (!c) return _ERR;
+    assert(c->rcv_buf);
+    int rt = sb_write(c->rcv_buf, buf, len);
+    assert(rt);
+    return _OK;
+}
+
+int pconn_is_exist(int id){
+    pconn_t *c = get_conn(id);
+    if (!c) return 0;
+    return 1;
+}
+
 
 /* ----------test------------ */
 /* int main(int argc, char const *argv[]) { return 0; } */

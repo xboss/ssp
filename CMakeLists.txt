@@ -21,12 +21,12 @@ target_link_libraries(ssp crypto)
 target_link_libraries(ssp pthread)
 
 ############# socks5 server (linux only) #############
-if(${CMAKE_SYSTEM_NAME} STREQUAL Linux)
-list(REMOVE_ITEM DIR_SRCS "${PROJECT_SOURCE_DIR}/src/cipher.c")
-add_executable(socks5_server ${DIR_SRCS})
-target_compile_definitions(socks5_server PUBLIC -DSOCKS5)
-target_link_libraries(socks5_server pthread)
-endif()
+# if(${CMAKE_SYSTEM_NAME} STREQUAL Linux)
+# list(REMOVE_ITEM DIR_SRCS "${PROJECT_SOURCE_DIR}/src/cipher.c")
+# add_executable(socks5_server ${DIR_SRCS})
+# target_compile_definitions(socks5_server PUBLIC -DSOCKS5)
+# target_link_libraries(socks5_server pthread)
+# endif()
 
 
 # ############# static #############

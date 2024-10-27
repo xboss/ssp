@@ -19,11 +19,6 @@
 #include "ssev.h"
 #include "sslog.h"
 
-#ifdef SOCKS5
-#include "dns_resolver.h"
-#include "socks.h"
-#endif
-
 #define SSPIPE_MODE_LOCAL 0
 #define SSPIPE_MODE_REMOTE 1
 #define SSPIPE_MODE_SOCKS5 2
@@ -96,9 +91,7 @@ static int load_conf(const char *conf_file, config_t *conf) {
         } else if (strcmp("target_port", keys[i]) == 0) {
             conf->target_port = (unsigned short)atoi(v);
         } else if (strcmp("password", keys[i]) == 0) {
-#ifndef SOCKS5
             pwd2key(conf->key, CIPHER_KEY_LEN, v, strlen(v));
-#endif
         } else if (strcmp("timeout", keys[i]) == 0) {
             conf->timeout = atoi(v);
         } else if (strcmp("read_buf_size", keys[i]) == 0) {
@@ -149,6 +142,29 @@ static int check_config(config_t *conf) {
 
 /* ---------- pipe callback ---------- */
 
+int front_recv_filter(sspipe_t *pipe, int fd, const char *buf, int len, char **out, int *out_len){
+    /* if unpack */
+    /* if decrypt */
+    /* if encrypt */
+    /* if pack */
+    /* TODO: */
+    char *plain = (char *)buf;
+    int plain_len = len;
+    if (pconn_is_secret(fd)) {
+        *out = aes_decrypt(g_conf.key, buf, len, out_len);
+        _LOG("decrypt ");
+    }
+    int cp_fd = pconn_get_couple_id(fd);
+}
+
+int backend_recv_filter(sspipe_t *pipe, int fd, const char *buf, int len, char **out, int *out_len){
+    /* if unpack */
+    /* if decrypt */
+    /* if encrypt */
+    /* if pack */
+    /* TODO: */
+}
+
 static int on_pipe_recv(sspipe_t *pipe, int fd, const char *buf, int len) {
     int cp_fd = pconn_get_couple_id(fd);
     if (cp_fd <= 0) {
@@ -157,21 +173,17 @@ static int on_pipe_recv(sspipe_t *pipe, int fd, const char *buf, int len) {
     }
     char *plain = (char *)buf;
     int plain_len = len;
-#ifndef SOCKS5
     if (pconn_is_secret(fd)) {
         plain = aes_decrypt(g_conf.key, buf, len, &plain_len);
         _LOG("decrypt ");
     }
-#endif
     char *cihper = plain;
     int cipher_len = plain_len;
-#ifndef SOCKS5
     if (pconn_is_secret(cp_fd)) {
         cihper = aes_encrypt(g_conf.key, plain, plain_len, &cipher_len);
         _LOG("encrypt ");
         assert(cipher_len % 16 == 0);
     }
-#endif
     int rt = sspipe_send(pipe, cp_fd, cihper, cipher_len);
     _LOG("sspipe_send rt:%d", rt);
 
@@ -235,33 +247,17 @@ int main(int argc, char const *argv[]) {
     if (check_config(&g_conf) != 0) return 1;
     sslog_init(g_conf.log_file, g_conf.log_level);
     if (g_conf.log_file) free(g_conf.log_file);
-    pipe_recv_cb_t recv_cb = on_pipe_recv;
-    pipe_accept_cb_t accept_cb = on_pipe_accept;
     g_loop = ssev_init();
     if (!g_loop) {
         _LOG_E("init loop error.");
         return 1;
     }
     ssev_set_ev_timeout(g_loop, g_conf.timeout);
-#ifdef SOCKS5
-    if (g_conf.mode == SSPIPE_MODE_SOCKS5) {
-        _LOG("socks5 mode...");
-        recv_cb = on_socks_recv;
-        accept_cb = on_socks_accept;
-        if (init_domain_resolver(g_loop) != 0) {
-            _LOG_E("init domain resolver error.");
-            return 1;
-        }
-    }
-#endif
 
-    g_pipe = sspipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, recv_cb, accept_cb);
+    g_pipe = sspipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, on_pipe_recv, on_pipe_accept);
     if (!g_pipe) {
         _LOG_E("init pipe error.");
         ssev_free(g_loop);
-#ifdef SOCKS5
-        free_domain_resolver(g_loop);
-#endif
         return 1;
     }
 
@@ -271,9 +267,6 @@ int main(int argc, char const *argv[]) {
     sigaction(SIGPIPE, &action, NULL);
     sigaction(SIGINT, &action, NULL);
     ssev_run(g_loop);
-#ifdef SOCKS5
-    free_domain_resolver(g_loop);
-#endif
     sspipe_free(g_pipe);
     ssev_free(g_loop);
 
