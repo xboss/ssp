@@ -5,7 +5,6 @@
 #include <errno.h>
 #include <stdio.h>
 
-
 /* #include "ilist.h" */
 #include "sslog.h"
 #include "ssnet.h"
@@ -80,18 +79,65 @@ static int on_recv(ssnet_t *net, int fd, const char *buf, int len, struct sockad
     sspipe_t *pipe = (sspipe_t *)ssnet_get_userdata(net);
     assert(pipe);
     pconn_st_t st = pconn_get_status(fd);
-    assert(st == PCONN_ST_ON);
+    if (st == PCONN_ST_OFF) {
+        sspipe_close_conn(pipe, fd);
+        return _OK;
+    }
     int rt = pconn_rcv(fd, buf, len);
     assert(rt == 0);
+    if (st == PCONN_ST_WAIT) {
+        return _OK;
+    }
+    assert(rt == PCONN_ST_ON);
+
     stream_buf_t *rcv_buf = pconn_get_rcv_buf(fd);
     assert(rcv_buf != NULL);
-    int new_len = sb_get_size(rcv_buf);
-    char* _ALLOC(new_buf, char *, new_len);
-    rt = sb_read_all(rcv_buf, new_buf, new_len);
-    assert(rt == new_len);
-    if (pipe->on_pipe_recv) rt = pipe->on_pipe_recv(pipe, fd, new_buf, new_len);
-    free(new_buf);
-    return rt;
+    int tmp_len = sb_get_size(rcv_buf);
+    char *_ALLOC(tmp_buf, char *, tmp_len);
+    rt = sb_read_all(rcv_buf, tmp_buf, tmp_len);
+    assert(rt == tmp_len);
+
+    /* if unpack */
+    if (!pconn_is_packet(fd)) {
+        if (pipe->on_pipe_recv) rt = pipe->on_pipe_recv(pipe, fd, tmp_buf, tmp_len);
+        /* TODO: if send */
+        free(tmp_buf);
+        return rt;
+    }
+
+    char *p = tmp_buf;
+    int l = tmp_len;
+    char *plain = NULL;
+    int plain_len = 0;
+    char *cihper = NULL;
+    int cipher_len = 0;
+    while (p < tmp_buf + tmp_len) {
+        p = unpack(p, l);
+        plain = ;
+        plain_len = ;
+        if (pconn_is_secret(fd)) {
+            plain = aes_decrypt(g_conf.key, buf, len, &plain_len);
+            _LOG("decrypt ");
+        }
+        if (pipe->on_pipe_recv) rt = pipe->on_pipe_recv(pipe, fd, plain, plain_len);
+        if (rt == _OK) {
+            cihper = ;
+            cihper_len = ;
+            if (pconn_is_secret(fd)) {
+                cihper = aes_encrypt(g_conf.key, plain, plain_len, &cipher_len);
+                _LOG("encrypt ");
+                assert(cipher_len % 16 == 0);
+            }
+            /* TODO: send */
+        }
+    }
+    free(tmp_buf);
+    /* if decrypt */
+
+    /* if send */
+    /* if encrypt */
+    /* if pack */
+    return _OK;
 }
 
 static int on_close(ssnet_t *net, int fd) {
@@ -104,10 +150,11 @@ static int on_close(ssnet_t *net, int fd) {
 static int on_accept(ssnet_t *net, int fd) {
     _LOG("on_accept fd:%d", fd);
     sspipe_t *pipe = (sspipe_t *)ssnet_get_userdata(net);
+    assert(pipe);
     int rt = pconn_init(fd, PCONN_TYPE_FR);
     if (rt != 0) return _ERR;
-    rt = pconn_chg_status(fd, PCONN_ST_ON);
-    assert(rt == 0);
+    rt = pconn_chg_status(fd, PCONN_ST_WAIT);
+    assert(rt != PCONN_ST_NONE);
     rt = pconn_set_can_write(fd, 1);
     assert(rt == 0);
     if (pipe->on_pipe_accept) pipe->on_pipe_accept(pipe, fd);
@@ -116,9 +163,16 @@ static int on_accept(ssnet_t *net, int fd) {
 
 static int on_connected(ssnet_t *net, int fd) {
     _LOG("on_connected fd:%d", fd);
-    if (!pconn_is_exist(fd) || pconn_get_type(fd) != PCONN_TYPE_BK) {
-        _LOG_E("on_connected fd:%d eroor", fd);
-        return _ERR;
+    if (!pconn_is_exist(fd)) {
+        _LOG("on_connected fd:%d does not exist, close", fd);
+        ssnet_tcp_close(net, fd);
+        return _OK;
+    }
+    if (pconn_get_status(fd) == PCONN_ST_OFF) {
+        _LOG("on_connected fd:%d off or not exist, close and free", fd);
+        ssnet_tcp_close(net, fd);
+        pconn_free(fd);
+        return _OK;
     }
     assert(pconn_get_type(fd) == PCONN_TYPE_BK);
     sspipe_t *pipe = (sspipe_t *)ssnet_get_userdata(net);
@@ -128,9 +182,9 @@ static int on_connected(ssnet_t *net, int fd) {
     int cp_fd = pconn_get_couple_id(fd);
     assert(pconn_get_type(cp_fd) == PCONN_TYPE_FR);
     assert(pconn_get_status(cp_fd) == PCONN_ST_ON);
-    
+
     int rt = pconn_chg_status(fd, PCONN_ST_ON);
-    assert(rt == 0);
+    assert(rt != PCONN_ST_NONE);
     _LOG("on_connected ok. fd:%d", fd);
     return _OK;
 }
@@ -190,7 +244,8 @@ static void free_close_cb(int id, void *u) {
 
 /* ---------- api ----------- */
 
-sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_ip, unsigned short listen_port, pipe_recv_cb_t on_pipe_recv, pipe_accept_cb_t on_pipe_accept) {
+sspipe_t *sspipe_init(ssev_loop_t *loop, int read_buf_size, const char *listen_ip, unsigned short listen_port,
+                      pipe_recv_cb_t on_pipe_recv, pipe_accept_cb_t on_pipe_accept) {
     if (!listen_ip || listen_port <= 0) return NULL;
     sspipe_t *_ALLOC(pipe, sspipe_t *, sizeof(sspipe_t));
     memset(pipe, 0, sizeof(sspipe_t));
@@ -212,9 +267,9 @@ sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_i
     pipe->loop = loop;
     pipe->on_pipe_recv = on_pipe_recv;
     pipe->on_pipe_accept = on_pipe_accept;
-/*     pipe->waiting_list = ilist_init();
-    assert(pipe->waiting_list);
-    ssev_set_update_cb(loop, update); */
+    /*     pipe->waiting_list = ilist_init();
+        assert(pipe->waiting_list);
+        ssev_set_update_cb(loop, update); */
     return pipe;
 }
 
@@ -247,7 +302,7 @@ void sspipe_free(sspipe_t *pipe) {
             int rt = ssev_unwatch(pipe->loop, SSEV_EV_ALL, id);
             assert(rt == 0);
             rt = pconn_chg_status(id, PCONN_ST_OFF);
-            assert(rt == 0);
+            assert(rt != PCONN_ST_NONE);
         }
     }
 } */
@@ -257,18 +312,13 @@ void sspipe_close_conn(sspipe_t *pipe, int fd) {
     if (!pconn_is_exist(fd)) return;
     int cp_fd = pconn_get_couple_id(fd);
     pconn_chg_status(fd, PCONN_ST_OFF);
-    pconn_st_t st = pconn_get_status(fd);
-    if (st == PCONN_ST_OFF)
-    {
-        ssnet_tcp_close(pipe->net, fd);
-        pconn_free(fd);
-        _LOG("sspipe_close_conn fd:%d", fd);
-        if (cp_fd > 0)
-        {
-            ssnet_tcp_close(pipe->net, cp_fd);
-            pconn_free(cp_fd);
-            _LOG("sspipe_close_conn cp_fd:%d", cp_fd);
-        }
+    ssnet_tcp_close(pipe->net, fd);
+    pconn_free(fd);
+    _LOG("sspipe_close_conn fd:%d", fd);
+    if (cp_fd > 0) {
+        ssnet_tcp_close(pipe->net, cp_fd);
+        pconn_free(cp_fd);
+        _LOG("sspipe_close_conn cp_fd:%d", cp_fd);
     }
     _LOG("sspipe_close_conn fd:%d cp_fd:%d ok.", fd, cp_fd);
 }
@@ -287,7 +337,7 @@ int sspipe_connect(sspipe_t *pipe, const char *ip, unsigned short port, int cp_f
     rt = pconn_init(fd, PCONN_TYPE_BK);
     assert(rt == 0);
     rt = pconn_chg_status(fd, PCONN_ST_READY);
-    assert(rt == 0);
+    assert(rt != PCONN_ST_NONE);
     rt = pconn_set_is_packet(fd, is_packet);
     assert(rt == 0);
     rt = pconn_set_is_secret(fd, is_secret);
@@ -296,6 +346,8 @@ int sspipe_connect(sspipe_t *pipe, const char *ip, unsigned short port, int cp_f
     assert(rt == 0);
     rt = pconn_set_couple_id(cp_fd, fd);
     assert(rt == 0);
+    rt = pconn_chg_status(cp_fd, PCONN_ST_ON);
+    assert(rt != PCONN_ST_NONE);
     return fd;
 }
 
@@ -303,26 +355,26 @@ int sspipe_send(sspipe_t *pipe, int fd, const char *buf, int len) {
     if (!pipe || fd <= 0 || !buf || len <= 0) return _ERR;
     if (pconn_get_status(fd) <= PCONN_ST_OFF) return _ERR;
     int rt = pconn_send(fd, buf, len);
-/*     char *w_buf = (char *)buf;
-    int w_buf_len = len;
-    if (pconn_is_packet(fd)) {
-        w_buf_len = pack(len, buf, &w_buf);
-        assert((w_buf_len - 4) % 16 == 0);
-        assert((w_buf_len - 4) == len);
-    }
-    assert(w_buf);
-    assert(w_buf_len > 0);
-    int rt = sb_write(pconn_get_snd_buf(fd), w_buf, w_buf_len);
-    if (w_buf != buf) free(w_buf);
-    if (rt != 0) {
-        _LOG("sspipe_send sb_write error fd:%d len:%d", fd, w_buf_len);
-        return _ERR;
-    }
-    rt = _OK;
-    ssev_notify_write(pipe->loop, fd);
-    if (pconn_get_status(fd) >= PCONN_ST_ON && pconn_can_write(fd)) {
-        rt = flush_tcp_send(pipe->net, fd);
-    } */
+    /*     char *w_buf = (char *)buf;
+        int w_buf_len = len;
+        if (pconn_is_packet(fd)) {
+            w_buf_len = pack(len, buf, &w_buf);
+            assert((w_buf_len - 4) % 16 == 0);
+            assert((w_buf_len - 4) == len);
+        }
+        assert(w_buf);
+        assert(w_buf_len > 0);
+        int rt = sb_write(pconn_get_snd_buf(fd), w_buf, w_buf_len);
+        if (w_buf != buf) free(w_buf);
+        if (rt != 0) {
+            _LOG("sspipe_send sb_write error fd:%d len:%d", fd, w_buf_len);
+            return _ERR;
+        }
+        rt = _OK;
+        ssev_notify_write(pipe->loop, fd);
+        if (pconn_get_status(fd) >= PCONN_ST_ON && pconn_can_write(fd)) {
+            rt = flush_tcp_send(pipe->net, fd);
+        } */
     _LOG("sspipe_send buf fd:%d rt:%d", fd, rt);
     return rt;
 }
