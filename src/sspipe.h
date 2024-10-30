@@ -14,7 +14,7 @@ sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_i
 void sspipe_free(sspipe_t* pipe);
 
 void sspipe_close_conn(sspipe_t* pipe, int fd);
-int sspipe_connect(sspipe_t* pipe, const char* ip, unsigned short port, int cp_fd, int is_secret, int is_packet);
+int sspipe_connect(sspipe_t* pipe, const char* ip, unsigned short port, int cp_fd, int is_secret/* , int is_packet */);
 int sspipe_send(sspipe_t* pipe, int fd, const char* buf, int len);
 
 #endif /* _SSPIPE_H */

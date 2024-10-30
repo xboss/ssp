@@ -14,18 +14,8 @@ int sslog_init(char *file, sslog_level level);
 void sslog_free();
 void sslog(sslog_level level, const char *fmt, ...);
 
-#ifdef DEBUG
-
 #ifndef _LOG
 #define _LOG(fmt, ...) sslog(SSLOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__);
-#endif
-
-#else
-
-#ifndef _LOG
-#define _LOG(fmt, ...)
-#endif
-
 #endif
 
 #ifndef _LOG_W

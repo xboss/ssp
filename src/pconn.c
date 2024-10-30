@@ -62,7 +62,7 @@ struct pconn_s {
     int is_secret;
     int is_packet;
     status_t* status;
-    int type;
+    pconn_type_t type;
     int ex;
     int can_write;
     uint64_t ctime;
@@ -268,16 +268,16 @@ int pconn_set_is_secret(int id, int is_secret) {
     return _OK;
 }
 
-int pconn_is_packet(int id) {
+/* int pconn_is_packet(int id) {
     _CHECK_PCONN_EXISTS(return 0;)
     return c->is_packet;
-}
+} */
 
-int pconn_set_is_packet(int id, int is_packet) {
+/* int pconn_set_is_packet(int id, int is_packet) {
     _CHECK_PCONN_EXISTS(return _ERR;)
     c->is_packet = is_packet;
     return _OK;
-}
+} */
 
 uint64_t pconn_get_ctime(int id) {
     _CHECK_PCONN_EXISTS(return 0lu;)

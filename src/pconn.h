@@ -42,8 +42,8 @@ int pconn_can_write(int id);
 int pconn_set_can_write(int id, int can_write);
 int pconn_is_secret(int id);
 int pconn_set_is_secret(int id, int is_secret);
-int pconn_is_packet(int id);
-int pconn_set_is_packet(int id, int is_packet);
+/* int pconn_is_packet(int id);
+int pconn_set_is_packet(int id, int is_packet); */
 uint64_t pconn_get_ctime(int id);
 
 #endif /* PCONN_H */
