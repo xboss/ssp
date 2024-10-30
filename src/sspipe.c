@@ -75,7 +75,7 @@ static int unpack(const char *buf, int len, char **out, int *payload_len) {
 static int flush_tcp_send(ssnet_t *net, int fd) {
     /* TODO: status ready can not send! */
     _LOG("flush_tcp_send fd:%d status:%d", fd, pconn_get_status(fd));
-    assert(pconn_get_status(fd) >= PCONN_ST_ON);
+    assert(pconn_get_status(fd) == PCONN_ST_ON);
     stream_buf_t *snd_buf = pconn_get_snd_buf(fd);
     int buf_len = sb_get_size(snd_buf);
     if (buf_len <= 0) {
@@ -126,7 +126,7 @@ static int on_recv(ssnet_t *net, int fd, const char *buf, int len, struct sockad
         assert(rt == 0);
         return _OK;
     }
-    assert(st == PCONN_ST_ON);
+    assert(st == PCONN_ST_ON || st == PCONN_ST_READY);
     rt = pconn_rcv(fd, buf, len);
     assert(rt == 0);
 
@@ -238,14 +238,12 @@ static int on_connected(ssnet_t *net, int fd) {
     sspipe_t *pipe = (sspipe_t *)ssnet_get_userdata(net);
     assert(pipe);
 
-    /* TODO: debug */
     int cp_fd = pconn_get_couple_id(fd);
     assert(pconn_get_type(cp_fd) == PCONN_TYPE_FR);
-    assert(pconn_get_status(cp_fd) == PCONN_ST_ON);
 
     int rt = pconn_chg_status(fd, PCONN_ST_ON);
     assert(rt != PCONN_ST_NONE);
-    stream_buf_t *wait_buf = pconn_get_wait_buf(fd);
+    stream_buf_t *wait_buf = pconn_get_wait_buf(cp_fd);
     assert(wait_buf);
     if (sb_get_size(wait_buf) > 0) {
         assert(sb_get_size(pconn_get_snd_buf(fd)) == 0);
@@ -260,7 +258,7 @@ static int on_writable(ssnet_t *net, int fd) {
     _LOG("on_writable fd:%d", fd);
     assert(pconn_get_type(fd) != 0);
     int rt = _OK;
-    if (pconn_get_status(fd) == PCONN_ST_READY) {
+    if (pconn_get_status(fd) == PCONN_ST_READY && pconn_get_type(fd) == PCONN_TYPE_BK) {
         rt = on_connected(net, fd);
     }
     sspipe_t *pipe = (sspipe_t *)ssnet_get_userdata(net);
@@ -268,9 +266,11 @@ static int on_writable(ssnet_t *net, int fd) {
     if (rt == _OK) {
         rt = pconn_set_can_write(fd, 1);
         assert(rt == 0);
-        rt = flush_tcp_send(net, fd);
-        if (rt != _OK) {
-            sspipe_close_conn(pipe, fd);
+        if (pconn_get_status(fd) == PCONN_ST_ON) {
+            rt = flush_tcp_send(net, fd);
+            if (rt != _OK) {
+                sspipe_close_conn(pipe, fd);
+            }
         }
     }
     return rt;
