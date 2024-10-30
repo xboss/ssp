@@ -9,7 +9,8 @@ typedef struct sspipe_s sspipe_t;
 typedef int (*pipe_recv_cb_t)(sspipe_t* pipe, int fd, const char* buf, int len);
 typedef int (*pipe_accept_cb_t)(sspipe_t* pipe, int fd);
 
-sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_ip, unsigned short listen_port, pipe_recv_cb_t on_pipe_recv, pipe_accept_cb_t on_pipe_accept);
+sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_ip, unsigned short listen_port,
+                      const char* key, pipe_recv_cb_t on_pipe_recv, pipe_accept_cb_t on_pipe_accept);
 void sspipe_free(sspipe_t* pipe);
 
 void sspipe_close_conn(sspipe_t* pipe, int fd);

@@ -14,10 +14,10 @@
 #include <unistd.h>
 
 #include "cipher.h"
-#include "sspipe.h"
 #include "ssconf.h"
 #include "ssev.h"
 #include "sslog.h"
+#include "sspipe.h"
 
 #define SSPIPE_MODE_LOCAL 0
 #define SSPIPE_MODE_REMOTE 1
@@ -142,60 +142,7 @@ static int check_config(config_t *conf) {
 
 /* ---------- pipe callback ---------- */
 
-int front_recv_filter(sspipe_t *pipe, int fd, const char *buf, int len, char **out, int *out_len){
-    /* if unpack */
-    /* if decrypt */
-    /* if encrypt */
-    /* if pack */
-    /* TODO: */
-    char *plain = (char *)buf;
-    int plain_len = len;
-    if (pconn_is_secret(fd)) {
-        *out = aes_decrypt(g_conf.key, buf, len, out_len);
-        _LOG("decrypt ");
-    }
-    int cp_fd = pconn_get_couple_id(fd);
-}
-
-int backend_recv_filter(sspipe_t *pipe, int fd, const char *buf, int len, char **out, int *out_len){
-    /* if unpack */
-    /* if decrypt */
-    /* if encrypt */
-    /* if pack */
-    /* TODO: */
-}
-
-static int on_pipe_recv(sspipe_t *pipe, int fd, const char *buf, int len) {
-    int cp_fd = pconn_get_couple_id(fd);
-    if (cp_fd <= 0) {
-        _LOG("couple does not exists. fd:%d", fd);
-        return -1;
-    }
-    char *plain = (char *)buf;
-    int plain_len = len;
-    if (pconn_is_secret(fd)) {
-        plain = aes_decrypt(g_conf.key, buf, len, &plain_len);
-        _LOG("decrypt ");
-    }
-    char *cihper = plain;
-    int cipher_len = plain_len;
-    if (pconn_is_secret(cp_fd)) {
-        cihper = aes_encrypt(g_conf.key, plain, plain_len, &cipher_len);
-        _LOG("encrypt ");
-        assert(cipher_len % 16 == 0);
-    }
-    int rt = sspipe_send(pipe, cp_fd, cihper, cipher_len);
-    _LOG("sspipe_send rt:%d", rt);
-
-    if (cihper && cihper != plain) free(cihper);
-    if (plain && plain != buf) free(plain);
-
-    if (rt != 0) {
-        sspipe_close_conn(pipe, fd);
-        return -1;
-    }
-    return 0;
-}
+/* static int on_pipe_recv(sspipe_t *pipe, int fd, const char *buf, int len) { return 0; } */
 
 static int on_pipe_accept(sspipe_t *pipe, int fd) {
     int is_cp_secret = 0;
@@ -254,7 +201,8 @@ int main(int argc, char const *argv[]) {
     }
     ssev_set_ev_timeout(g_loop, g_conf.timeout);
 
-    g_pipe = sspipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, on_pipe_recv, on_pipe_accept);
+    g_pipe = sspipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, g_conf.key, NULL,
+                         on_pipe_accept);
     if (!g_pipe) {
         _LOG_E("init pipe error.");
         ssev_free(g_loop);
