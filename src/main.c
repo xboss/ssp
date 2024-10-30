@@ -4,7 +4,6 @@
 
 #include <assert.h>
 #include <ctype.h>
-/* #include <netinet/ip.h> */
 #include <arpa/inet.h>
 #include <signal.h>
 #include <stdint.h>
@@ -15,7 +14,6 @@
 
 #include "cipher.h"
 #include "ssconf.h"
-#include "ssev.h"
 #include "sslog.h"
 #include "sspipe.h"
 

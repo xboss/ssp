@@ -85,7 +85,7 @@ static void domain_cb(domain_req_t *req) {
         /* ack[5 + d_len] = htons(port); */
         memcpy(ack + 5 + d_len, &nport, 2);
 
-        int cp_fd = sspipe_connect(pipe, ip, port, src_fd, 0, 0);
+        int cp_fd = sspipe_connect(pipe, ip, port, src_fd, 0);
         if (cp_fd <= 0) {
             sspipe_close_conn(pipe, src_fd);
             sspipe_close_conn(pipe, cp_fd); /* TODO: */
@@ -226,7 +226,7 @@ static void ss5_req(sspipe_t *pipe, int fd, const char *buf, int len) {
         return;
     }
 
-    int cp_fd = sspipe_connect(pipe, ip, port, fd, 0, 0);
+    int cp_fd = sspipe_connect(pipe, ip, port, fd, 0);
     if (cp_fd <= 0) {
         sspipe_close_conn(pipe, fd);
         return;
