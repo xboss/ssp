@@ -20,27 +20,6 @@
     }
 #endif
 
-#define _FREE_PCONN_ITEM                   \
-    if (c->snd_buf) {                      \
-        sb_free(c->snd_buf);               \
-        c->snd_buf = NULL;                 \
-    }                                      \
-    if (c->rcv_buf) {                      \
-        sb_free(c->rcv_buf);               \
-        c->rcv_buf = NULL;                 \
-    }                                      \
-    if (c->wait_buf) {                     \
-        sb_free(c->wait_buf);              \
-        c->wait_buf = NULL;                \
-    }                                      \
-    if (c->status) {                       \
-        free(c->status);                   \
-        c->status = NULL;                  \
-    }                                      \
-    if (g_conn_tb) HASH_DEL(g_conn_tb, c); \
-    free(c);                               \
-    c = NULL
-
 #define _CHECK_PCONN_EXISTS(_code_block) \
     if (id <= 0) {                       \
         _code_block                      \
@@ -50,28 +29,34 @@
         _code_block                      \
     }
 
+typedef struct pconn_s pconn_t;
+
 typedef struct {
     pconn_st_t fr_st;
     pconn_st_t bk_st;
-    pconn_st_t st;
-} status_t;
+    /* pconn_st_t st; */
+    stream_buf_t* fr_snd_buf;
+    stream_buf_t* fr_rcv_buf;
+    stream_buf_t* bk_snd_buf;
+    stream_buf_t* bk_rcv_buf;
+    /*     pconn_t* fr;
+        pconn_t* bk; */
+    int ref_cnt;
+} pconn_info_t;
 
 struct pconn_s {
     int id;
     int cp_id;
     int is_secret;
     int is_packet;
-    status_t* status;
     pconn_type_t type;
     int ex;
     int can_write;
     uint64_t ctime;
-    stream_buf_t* snd_buf;
-    stream_buf_t* rcv_buf;
-    stream_buf_t* wait_buf;
+    /* uint64_t cp_ctime; */
+    pconn_info_t* info;
     UT_hash_handle hh;
 };
-typedef struct pconn_s pconn_t;
 
 static pconn_t* g_conn_tb = NULL;
 
@@ -95,46 +80,82 @@ int pconn_init(int id, pconn_type_t type, int cp_id) {
     }
     /* TODO: debug */
     pconn_t* c = get_conn(id);
-    if (c) {
-        _LOG_E("pconn_init conn exsits, fd:%d cp_id:%d type:%d status:%d", c->id, c->cp_id, c->type, c->status);
-    }
+    assert(c == NULL);
 
-    status_t* status = NULL;
+    /* uint64_t cp_time = 0L; */
+    pconn_info_t* info = NULL;
     if (type == PCONN_TYPE_BK) {
         pconn_t* cp = get_conn(cp_id);
         assert(cp);
-        assert(cp->status);
-        status = cp->status;
+        assert(cp->info);
+        info = cp->info;
+        /* info->bk = c; */
+        /* cp_time = cp->ctime; */
     } else {
-        _ALLOC(status, status_t*, sizeof(status_t));
+        _ALLOC(info, pconn_info_t*, sizeof(pconn_info_t));
+        memset(info, 0, sizeof(pconn_info_t));
+        /* info->fr = c; */
+        info->fr_st = PCONN_ST_NONE;
+        info->bk_st = PCONN_ST_NONE;
+        /* info->st = PCONN_ST_NONE; */
+        info->fr_rcv_buf = sb_init(NULL, 0);
+        info->fr_snd_buf = sb_init(NULL, 0);
+        info->bk_rcv_buf = sb_init(NULL, 0);
+        info->bk_snd_buf = sb_init(NULL, 0);
     }
-    status->fr_st = PCONN_ST_NONE;
-    status->bk_st = PCONN_ST_NONE;
-    status->st = PCONN_ST_NONE;
 
     _ALLOC(c, pconn_t*, sizeof(pconn_t));
     memset(c, 0, sizeof(pconn_t));
     c->id = id;
     c->type = type;
     c->ctime = mstime();
-    c->rcv_buf = sb_init(NULL, 0);
-    c->snd_buf = sb_init(NULL, 0);
-    c->wait_buf = sb_init(NULL, 0);
-    c->status = status;
+    c->info = info;
+    info->ref_cnt++;
+    c->can_write = 0;
+    /* c->cp_ctime = cp_time; */
     HASH_ADD_INT(g_conn_tb, id, c);
     _LOG("pconn_init ok. id:%d", id);
     return _OK;
 }
 
-void pconn_free(int id /* , int cp_id */) {
+void pconn_free(int id) {
     if (id <= 0) return;
     pconn_t* c = get_conn(id);
-    if (c) {
-        pconn_t* cp = get_conn(c->cp_id);
-        if (cp) cp->status = NULL;
-        _FREE_PCONN_ITEM;
-        _LOG("pconn_free id:%d", id);
+    if (!c) {
+        return;
     }
+    if (c->info) {
+        if (c->info->fr_snd_buf) {
+            sb_free(c->info->fr_snd_buf);
+            c->info->fr_snd_buf = NULL;
+        }
+        if (c->info->fr_rcv_buf) {
+            sb_free(c->info->fr_rcv_buf);
+            c->info->fr_rcv_buf = NULL;
+        }
+        if (c->info->bk_snd_buf) {
+            sb_free(c->info->bk_snd_buf);
+            c->info->bk_snd_buf = NULL;
+        }
+        if (c->info->bk_rcv_buf) {
+            sb_free(c->info->bk_rcv_buf);
+            c->info->bk_rcv_buf = NULL;
+        }
+        /*         if (c->type == PCONN_TYPE_FR) {
+                    c->info->fr = NULL;
+                }
+                if (c->type == PCONN_TYPE_BK) {
+                    c->info->bk = NULL;
+                } */
+        c->info->ref_cnt--;
+        if (c->info->ref_cnt <= 0) {
+            free(c->info);
+            c->info = NULL;
+        }
+    }
+    if (g_conn_tb) HASH_DEL(g_conn_tb, c);
+    free(c);
+    _LOG("pconn_free id:%d", id);
 }
 
 void pconn_free_all(void* u, void (*fn)(int id, void* u)) {
@@ -148,38 +169,28 @@ void pconn_free_all(void* u, void (*fn)(int id, void* u)) {
     _LOG("pconn_free_all ok.");
 }
 
-pconn_st_t pconn_chg_status(int id, pconn_st_t status) {
+int pconn_set_status(int id, pconn_st_t status) {
     pconn_t* c = get_conn(id);
-    if (!c) return PCONN_ST_NONE;
+    if (!c) return _ERR;
     if (c->type == PCONN_TYPE_FR)
-        c->status->fr_st = status;
+        c->info->fr_st = status;
     else
-        c->status->bk_st = status;
-
-    if (c->status->fr_st == PCONN_ST_OFF || c->status->bk_st == PCONN_ST_OFF) {
-        c->status->st = PCONN_ST_OFF;
-    } else if (c->status->fr_st == PCONN_ST_WAIT) {
-        c->status->st = PCONN_ST_WAIT;
-        assert(c->status->bk_st == PCONN_ST_NONE);
-    } else if (c->status->bk_st == PCONN_ST_READY) {
-        c->status->st = PCONN_ST_READY;
-        assert(c->status->fr_st == PCONN_ST_ON);
-    } else {
-        c->status->st = PCONN_ST_ON;
-        /* assert((c->status->fr_st == PCONN_ST_ON && c->status->bk_st == PCONN_ST_ON) ||
-               (c->status->fr_st == PCONN_ST_ON && c->status->bk_st == PCONN_ST_READY)); */
-    }
-    return c->status->st;
+        c->info->bk_st = status;
+    return _OK;
 }
 
 pconn_st_t pconn_get_status(int id) {
-    _CHECK_PCONN_EXISTS(return PCONN_ST_OFF;)
-    assert(c->status);
-    return c->status->st;
+    pconn_t* c = get_conn(id);
+    if (!c) return _ERR;
+    assert(c->info);
+    if (c->type == PCONN_TYPE_FR) {
+        return c->info->fr_st;
+    }
+    return c->info->bk_st;
 }
 
 pconn_type_t pconn_get_type(int id) {
-    _CHECK_PCONN_EXISTS(return 0;)
+    _CHECK_PCONN_EXISTS(return PCONN_TYPE_NONE;)
     return c->type;
 }
 
@@ -207,43 +218,23 @@ int pconn_set_ex(int id, int ex) {
 }
 
 stream_buf_t* pconn_get_snd_buf(int id) {
-    _CHECK_PCONN_EXISTS(return NULL;)
-    if (!c->snd_buf) c->snd_buf = sb_init(NULL, 0);
-    return c->snd_buf;
-}
-
-int pconn_set_snd_buf(int id, stream_buf_t* sb) {
     pconn_t* c = get_conn(id);
-    if (!c) return _ERR;
-    if (c->snd_buf) {
-        sb_free(c->snd_buf);
-        c->snd_buf = NULL;
+    if (!c) return NULL;
+    assert(c->info);
+    if (c->type == PCONN_TYPE_FR) {
+        return c->info->fr_snd_buf;
     }
-    c->snd_buf = sb;
-    return _OK;
+    return c->info->bk_snd_buf;
 }
 
 stream_buf_t* pconn_get_rcv_buf(int id) {
-    _CHECK_PCONN_EXISTS(return NULL;)
-    if (!c->rcv_buf) c->rcv_buf = sb_init(NULL, 0);
-    return c->rcv_buf;
-}
-
-stream_buf_t* pconn_get_wait_buf(int id) {
-    _CHECK_PCONN_EXISTS(return NULL;)
-    if (!c->wait_buf) c->wait_buf = sb_init(NULL, 0);
-    return c->wait_buf;
-}
-
-int pconn_set_wait_buf(int id, stream_buf_t* sb) {
     pconn_t* c = get_conn(id);
-    if (!c) return _ERR;
-    if (c->wait_buf) {
-        sb_free(c->wait_buf);
-        c->wait_buf = NULL;
+    if (!c) return NULL;
+    assert(c->info);
+    if (c->type == PCONN_TYPE_FR) {
+        return c->info->fr_rcv_buf;
     }
-    c->wait_buf = sb;
-    return _OK;
+    return c->info->bk_rcv_buf;
 }
 
 int pconn_can_write(int id) {
@@ -284,36 +275,20 @@ uint64_t pconn_get_ctime(int id) {
     return c->ctime;
 }
 
-int pconn_send(int id, const char* buf, int len) {
-    pconn_t* c = get_conn(id);
-    if (!c) return _ERR;
-    assert(c->snd_buf);
-    int rt = sb_write(c->snd_buf, buf, len);
-    assert(rt == _OK);
-    return _OK;
-}
-
-int pconn_rcv(int id, const char* buf, int len) {
-    pconn_t* c = get_conn(id);
-    if (!c) return _ERR;
-    assert(c->rcv_buf);
-    int rt = sb_write(c->rcv_buf, buf, len);
-    assert(rt == _OK);
-    return _OK;
-}
-
-int pconn_wait(int id, const char* buf, int len) {
-    pconn_t* c = get_conn(id);
-    if (!c) return _ERR;
-    assert(c->wait_buf);
-    int rt = sb_write(c->wait_buf, buf, len);
-    assert(rt == _OK);
-    return _OK;
-}
-
 int pconn_is_exist(int id) {
     pconn_t* c = get_conn(id);
     if (!c) return 0;
+    return 1;
+}
+
+int pconn_is_couple(int id) {
+    pconn_t* c = get_conn(id);
+    if (!c) return 0;
+    pconn_t* cp = get_conn(c->cp_id);
+    if (!cp) return 0;
+    if (c->info != cp->info) {
+        return 0;
+    }
     return 1;
 }
 
