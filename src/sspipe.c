@@ -29,7 +29,7 @@ struct sspipe_s {
     ssev_loop_t* loop;
     int server_fd;
     char* key;
-    pipe_recv_cb_t on_pipe_recv;
+    /* pipe_recv_cb_t on_pipe_recv; */
     pipe_accept_cb_t on_pipe_accept;
 };
 
@@ -48,7 +48,7 @@ static int pack(int payload_len, const char* payload, char** buf) {
     return payload_len + PACKET_HEAD_LEN;
 }
 
-static int unpack(const char* buf, int len, char** out, int* payload_len) {
+/* static int unpack(const char* buf, int len, char** out, int* payload_len) {
     _LOG("uppack len:%d", len);
     assert(buf);
     assert(len > 0);
@@ -56,10 +56,10 @@ static int unpack(const char* buf, int len, char** out, int* payload_len) {
         return _ERR;
     }
     *payload_len = ntohl(*(uint32_t*)(buf));
-    if (*payload_len <= 0 && *payload_len > 65535) {
-        /* TODO: debug */
-        _LOG_E("unpack payload_len:%d error", *payload_len);
+    if (*payload_len <= 0 || *payload_len > 65535) {
+        _LOG_E("unpack payload_len:%d error, len:%d", *payload_len, len);
     }
+    assert(*payload_len > 0 && *payload_len < 65535);
 
     if (len < *payload_len + PACKET_HEAD_LEN) {
         return _ERR;
@@ -67,6 +67,29 @@ static int unpack(const char* buf, int len, char** out, int* payload_len) {
     *out += PACKET_HEAD_LEN;
     assert(*out >= buf && *out < buf + len);
     assert(*out + *payload_len <= buf + len);
+    _LOG("uppack len:%d payload_len:%d ok.", len, *payload_len);
+    return _OK;
+} */
+
+static int unpack(char** p, int len, int* payload_len) {
+    _LOG("uppack len:%d", len);
+    assert(p);
+    assert(*p);
+    assert(len > 0);
+    if (len < PACKET_HEAD_LEN) {
+        return _ERR;
+    }
+    *payload_len = ntohl(*(uint32_t*)(*p));
+    if (*payload_len <= 0 || *payload_len > 65535) {
+        /* TODO: debug */
+        _LOG_E("unpack payload_len:%d error, len:%d", *payload_len, len);
+    }
+    assert(*payload_len > 0 && *payload_len < 65535);
+
+    if (len < *payload_len + PACKET_HEAD_LEN) {
+        return _ERR;
+    }
+    *p += PACKET_HEAD_LEN;
     _LOG("uppack len:%d payload_len:%d ok.", len, *payload_len);
     return _OK;
 }
@@ -81,7 +104,7 @@ static int unpack(const char* buf, int len, char** out, int* payload_len) {
  * @param snd_buf
  * @param buf must be encrypted
  * @param len
- * @return int
+ * @return int _ERR _OK
  */
 static int flush_tcp_send(ssnet_t* net, int fd, stream_buf_t* snd_buf, const char* buf, int len) {
     _LOG("flush_tcp_send fd:%d status:%d type:%d", fd, pconn_get_status(fd), pconn_get_type(fd));
@@ -127,61 +150,42 @@ static char* encrypt_and_pack(int fd, const char* buf, int len, char* key, int* 
 
 /* ---------- callback ----------- */
 
-/* TODO: */
 static int on_recv(ssnet_t* net, int fd, const char* buf, int len, struct sockaddr* addr) {
     _LOG("sspipe on_recv fd:%d len:%d", fd, len);
-    pconn_type_t type = pconn_get_type(fd);
-    assert(type == PCONN_TYPE_FR || type == PCONN_TYPE_BK);
     sspipe_t* pipe = (sspipe_t*)ssnet_get_userdata(net);
     assert(pipe);
-    pconn_st_t st = pconn_get_status(fd);
-    if (st == PCONN_ST_OFF) {
+    int cp_fd = pconn_get_couple_id(fd);
+    if (cp_fd <= 0 || pconn_get_status(fd) <= PCONN_ST_OFF || pconn_get_status(cp_fd) <= PCONN_ST_OFF) {
         sspipe_close_conn(pipe, fd);
-        return _OK;
+        return _ERR;
     }
     int rt = _ERR;
-    if (st == PCONN_ST_WAIT) {
-        rt = pconn_wait(fd, buf, len);
-        assert(rt == 0);
-        return _OK;
-    }
-    assert(st == PCONN_ST_ON || st == PCONN_ST_READY);
-    rt = pconn_rcv(fd, buf, len);
-    assert(rt == 0);
-
     stream_buf_t* rcv_buf = pconn_get_rcv_buf(fd);
     assert(rcv_buf != NULL);
-    int tmp_len = sb_get_size(rcv_buf);
-    char* _ALLOC(tmp_buf, char*, tmp_len);
-    rt = sb_read_all(rcv_buf, tmp_buf, tmp_len);
-    assert(rt == tmp_len);
-
-    int cp_fd = pconn_get_couple_id(fd);
+    sb_write(rcv_buf, buf, len);
+    int rlen = sb_get_size(rcv_buf);
+    char* _ALLOC(rbuf, char*, rlen + len);
+    rt = sb_read_all(rcv_buf, rbuf, rlen);
+    assert(rt == rlen);
 
     if (!pconn_is_secret(fd)) {
-        rt = _OK;
-        if (pipe->on_pipe_recv) rt = pipe->on_pipe_recv(pipe, fd, tmp_buf, tmp_len);
-        if (rt == _OK) {
-            rt = send_to_conn(cp_fd, tmp_buf, tmp_len, pipe);
-            assert(rt == _OK);
-        }
-        free(tmp_buf);
+        rt = sspipe_send(pipe, cp_fd, rbuf, rlen);
+        if (rt != _OK) sspipe_close_conn(pipe, fd);
+        free(rbuf);
         return _OK;
     }
-
-    char* p = tmp_buf;
-    int rlen = tmp_len;
+    char* p = rbuf;
+    int rl = rlen;
     char* plain = NULL;
     int plain_len = 0;
     int payload_len = 0;
-    while (rlen > 0 && pconn_is_exist(fd)) {
-        rt = unpack(p, rlen, &p, &payload_len);
+    while (rl > 0 && pconn_is_exist(fd)) {
+        rt = unpack(&p, rl, &payload_len);
         if (rt != _OK) {
             assert(rcv_buf);
             assert(p);
-            assert(rlen > 0);
-            rt = sb_write(rcv_buf, p, rlen);
-            assert(rt == 0);
+            assert(rl > 0);
+            sb_write(rcv_buf, p, rl);
             break;
         }
         plain = p;
@@ -190,16 +194,18 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len, struct sockad
             plain = aes_decrypt(pipe->key, p, payload_len, &plain_len);
             _LOG("decrypt ");
         }
-        if (pipe->on_pipe_recv) rt = pipe->on_pipe_recv(pipe, fd, plain, plain_len);
-        if (rt == _OK) {
-            rt = send_to_conn(cp_fd, plain, plain_len, pipe);
-            assert(rt == _OK);
+        rt = sspipe_send(pipe, cp_fd, plain, plain_len);
+        if (rt != _OK) {
+            sspipe_close_conn(pipe, fd);
+            if (plain != p) free(plain);
+            free(rbuf);
+            return _ERR;
         }
         if (plain != p) free(plain);
         p += payload_len;
-        rlen -= payload_len + PACKET_HEAD_LEN;
+        rl -= payload_len + PACKET_HEAD_LEN;
     }
-    free(tmp_buf);
+    free(rbuf);
     return _OK;
 }
 
@@ -210,14 +216,13 @@ static int on_close(ssnet_t* net, int fd) {
     return _OK;
 }
 
-/* TODO: */
 static int on_accept(ssnet_t* net, int fd) {
     _LOG("on_accept fd:%d", fd);
     sspipe_t* pipe = (sspipe_t*)ssnet_get_userdata(net);
     assert(pipe);
     int rt = pconn_init(fd, PCONN_TYPE_FR, 0);
     if (rt != 0) return _ERR;
-    rt = pconn_chg_status(fd, PCONN_ST_WAIT);
+    rt = pconn_set_status(fd, PCONN_ST_ON);
     assert(rt == _OK);
     rt = pconn_set_can_write(fd, 1);
     assert(rt == 0);
@@ -297,8 +302,7 @@ static void free_close_cb(int id, void* u) {
 
 /* ---------- api ----------- */
 
-sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_ip, unsigned short listen_port,
-                      const char* key, pipe_recv_cb_t on_pipe_recv, pipe_accept_cb_t on_pipe_accept) {
+sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_ip, unsigned short listen_port, const char* key, /* pipe_recv_cb_t on_pipe_recv, */ pipe_accept_cb_t on_pipe_accept) {
     if (!listen_ip || listen_port <= 0) return NULL;
     sspipe_t* _ALLOC(pipe, sspipe_t*, sizeof(sspipe_t));
     memset(pipe, 0, sizeof(sspipe_t));
@@ -319,7 +323,7 @@ sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_i
     }
     pipe->loop = loop;
     pipe->key = (char*)key;
-    pipe->on_pipe_recv = on_pipe_recv;
+    /* pipe->on_pipe_recv = on_pipe_recv; */
     pipe->on_pipe_accept = on_pipe_accept;
     return pipe;
 }
@@ -371,9 +375,9 @@ int sspipe_connect(sspipe_t* pipe, const char* ip, unsigned short port, int cp_f
     }
     int rt = pconn_init(fd, PCONN_TYPE_BK, cp_fd);
     assert(rt == 0);
-    rt = pconn_chg_status(cp_fd, PCONN_ST_ON);
+    rt = pconn_set_status(cp_fd, PCONN_ST_ON);
     assert(rt == _OK);
-    rt = pconn_chg_status(fd, PCONN_ST_READY);
+    rt = pconn_set_status(fd, PCONN_ST_READY);
     assert(rt == _OK);
     rt = pconn_set_is_secret(fd, is_secret);
     assert(rt == 0);
@@ -403,10 +407,9 @@ int sspipe_send(sspipe_t* pipe, int fd, const char* buf, int len) {
     char* pk_buf = encrypt_and_pack(fd, buf, len, pipe->key, &pk_len);
     int rt;
     if (pconn_get_status(fd) == PCONN_ST_READY) {
-        rt = sb_write(snd_buf, pk_buf, pk_len);
-        assert(rt == _OK);
+        sb_write(snd_buf, pk_buf, pk_len);
         if (pk_buf != buf) free(pk_buf);
-        return rt;
+        return _OK;
     }
 
     int wlen = sb_get_size(snd_buf);
@@ -415,8 +418,7 @@ int sspipe_send(sspipe_t* pipe, int fd, const char* buf, int len) {
         if (pk_buf != buf) free(pk_buf);
         return rt;
     }
-    rt = sb_write(snd_buf, pk_buf, pk_len);
-    assert(rt == _OK);
+    sb_write(snd_buf, pk_buf, pk_len);
     if (pconn_can_write(fd)) {
         char* _ALLOC(wbuf, char*, wlen);
         sb_read_all(snd_buf, wbuf, wlen);

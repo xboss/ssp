@@ -201,7 +201,7 @@ int main(int argc, char const* argv[]) {
     }
     ssev_set_ev_timeout(g_loop, g_conf.timeout);
 
-    g_pipe = sspipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, g_conf.key, NULL, on_pipe_accept);
+    g_pipe = sspipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, g_conf.key, on_pipe_accept);
     if (!g_pipe) {
         _LOG_E("init pipe error.");
         ssev_free(g_loop);
