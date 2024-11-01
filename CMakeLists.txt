@@ -19,24 +19,6 @@ add_executable(ssp ${DIR_SRCS})
 target_link_libraries(ssp ssl)
 target_link_libraries(ssp crypto)
 
-aux_source_directory(${PROJECT_SOURCE_DIR}/src/socks DIR_SOCKS_SRCS)
-############# socks5 server (linux only) #############
-if(${CMAKE_SYSTEM_NAME} STREQUAL Linux)
-list(APPEND DIR_SOCKS_SRCS "${PROJECT_SOURCE_DIR}/src/sslog.c")
-list(APPEND DIR_SOCKS_SRCS "${PROJECT_SOURCE_DIR}/src/ssev_epoll.c")
-list(APPEND DIR_SOCKS_SRCS "${PROJECT_SOURCE_DIR}/src/sspipe.c")
-list(APPEND DIR_SOCKS_SRCS "${PROJECT_SOURCE_DIR}/src/ssnet.c")
-list(APPEND DIR_SOCKS_SRCS "${PROJECT_SOURCE_DIR}/src/stream_buf.c")
-list(APPEND DIR_SOCKS_SRCS "${PROJECT_SOURCE_DIR}/src/pconn.c")
-list(APPEND DIR_SOCKS_SRCS "${PROJECT_SOURCE_DIR}/src/cipher.c")
-list(APPEND DIR_SOCKS_SRCS "${PROJECT_SOURCE_DIR}/src/thread_pool.c")
-add_executable(socks5_server ${DIR_SOCKS_SRCS})
-#target_compile_definitions(socks5_server PUBLIC -DSOCKS5)
-target_link_libraries(socks5_server pthread)
-target_link_libraries(socks5_server ssl)
-target_link_libraries(socks5_server crypto)
-endif()
-
 
 # ############# static #############
 # add_executable(ssp ${DIR_SRCS})

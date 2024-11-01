@@ -59,7 +59,11 @@ static int unpack(const char* buf, int len, char** out, int* payload_len) {
         return _ERR;
     }
     *payload_len = ntohl(*(uint32_t*)(buf));
-    assert(*payload_len > 0 && *payload_len < 65535);
+    if (*payload_len <= 0 && *payload_len > 65535) {
+        /* TODO: debug */
+        _LOG_E("unpack payload_len:%d error", *payload_len);
+    }
+
     if (len < *payload_len + PACKET_HEAD_LEN) {
         return _ERR;
     }
@@ -322,7 +326,8 @@ static void free_close_cb(int id, void* u) {
 
 /* ---------- api ----------- */
 
-sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_ip, unsigned short listen_port, const char* key, pipe_recv_cb_t on_pipe_recv, pipe_accept_cb_t on_pipe_accept) {
+sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_ip, unsigned short listen_port,
+                      const char* key, pipe_recv_cb_t on_pipe_recv, pipe_accept_cb_t on_pipe_accept) {
     if (!listen_ip || listen_port <= 0) return NULL;
     sspipe_t* _ALLOC(pipe, sspipe_t*, sizeof(sspipe_t));
     memset(pipe, 0, sizeof(sspipe_t));
@@ -376,7 +381,8 @@ void sspipe_close_conn(sspipe_t* pipe, int fd) {
     _LOG("sspipe_close_conn fd:%d cp_fd:%d ok.", fd, cp_fd);
 }
 
-int sspipe_connect(sspipe_t* pipe, const char* ip, unsigned short port, int cp_fd, int is_secret /* , int is_packet */) {
+int sspipe_connect(sspipe_t* pipe, const char* ip, unsigned short port, int cp_fd,
+                   int is_secret /* , int is_packet */) {
     if (!pipe || port <= 0 || !ip || cp_fd <= 0) return _ERR;
     assert(pconn_get_type(cp_fd) == PCONN_TYPE_FR);
     assert(pconn_get_couple_id(cp_fd) == 0);
