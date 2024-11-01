@@ -66,12 +66,12 @@ static ssev_watcher_t *init_watcher(int fd, unsigned int events, ssev_cb_t ssev_
     return w;
 }
 
-static int watchers_size(ssev_loop_t *loop) {
+/* static int watchers_size(ssev_loop_t *loop) {
     if (!loop || !loop->watchers) {
         return 0;
     }
     return HASH_COUNT(loop->watchers);
-}
+} */
 
 static ssev_watcher_t *get_watcher(ssev_loop_t *loop, int fd) {
     if (!loop || !loop->watchers || fd <= 0) {
