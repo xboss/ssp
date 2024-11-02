@@ -164,7 +164,8 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len, struct sockad
     assert(rcv_buf != NULL);
     sb_write(rcv_buf, buf, len);
     int rlen = sb_get_size(rcv_buf);
-    char* _ALLOC(rbuf, char*, rlen + len);
+    char* _ALLOC(rbuf, char*, rlen);
+    memset(rbuf, 0, rlen);
     rt = sb_read_all(rcv_buf, rbuf, rlen);
     assert(rt == rlen);
 
@@ -421,6 +422,7 @@ int sspipe_send(sspipe_t* pipe, int fd, const char* buf, int len) {
     sb_write(snd_buf, pk_buf, pk_len);
     if (pconn_can_write(fd)) {
         char* _ALLOC(wbuf, char*, wlen);
+        memset(wbuf, 0, wlen);
         sb_read_all(snd_buf, wbuf, wlen);
         rt = flush_tcp_send(pipe->net, fd, snd_buf, wbuf, wlen);
         free(wbuf);
