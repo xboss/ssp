@@ -84,7 +84,7 @@ static int unpack(char** p, int len, int* payload_len) {
         /* TODO: debug */
         _LOG_E("unpack payload_len:%d error, len:%d", *payload_len, len);
     }
-    assert(*payload_len > 0 && *payload_len < 65535);
+    /* assert(*payload_len > 0 && *payload_len < 65535); */
 
     if (len < *payload_len + PACKET_HEAD_LEN) {
         return _ERR;
@@ -189,6 +189,12 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len, struct sockad
             sb_write(rcv_buf, p, rl);
             break;
         }
+        if (payload_len < 0 || payload_len > 65535) { /* TODO: debug */
+            sspipe_close_conn(pipe, fd);
+            free(rbuf);
+            return _OK;
+        }
+
         plain = p;
         plain_len = payload_len;
         if (pconn_is_secret(fd)) {
@@ -406,7 +412,7 @@ int sspipe_send(sspipe_t* pipe, int fd, const char* buf, int len) {
     assert(snd_buf);
     int pk_len;
     char* pk_buf = encrypt_and_pack(fd, buf, len, pipe->key, &pk_len);
-    int rt= _ERR;
+    int rt = _ERR;
     if (pconn_get_status(fd) == PCONN_ST_READY) {
         sb_write(snd_buf, pk_buf, pk_len);
         if (pk_buf != buf) free(pk_buf);
