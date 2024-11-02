@@ -20,9 +20,9 @@ target_link_libraries(ssp ssl)
 target_link_libraries(ssp crypto)
 
 
-# ############# static #############
-# add_executable(ssp ${DIR_SRCS})
-# target_link_libraries(ssp_static ssl -static)
-# target_link_libraries(ssp_static crypto -static)
+############# static #############
+add_executable(ssp_static ${DIR_SRCS})
+target_link_libraries(ssp_static ssl -static)
+target_link_libraries(ssp_static crypto -static)
 
 #cmake -DCMAKE_BUILD_TYPE=Debug ..

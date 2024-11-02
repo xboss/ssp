@@ -406,7 +406,7 @@ int sspipe_send(sspipe_t* pipe, int fd, const char* buf, int len) {
     assert(snd_buf);
     int pk_len;
     char* pk_buf = encrypt_and_pack(fd, buf, len, pipe->key, &pk_len);
-    int rt;
+    int rt= _ERR;
     if (pconn_get_status(fd) == PCONN_ST_READY) {
         sb_write(snd_buf, pk_buf, pk_len);
         if (pk_buf != buf) free(pk_buf);

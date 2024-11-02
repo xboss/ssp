@@ -365,7 +365,7 @@ int ssnet_udp_init(ssnet_t *net, const char *ip, unsigned short port, int is_bin
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (-1 == fd) return _ERR;
     struct sockaddr_in addr;
-    bzero(&addr, sizeof(struct sockaddr_in));
+    memset(&addr,0, sizeof(struct sockaddr_in));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr(ip);
     addr.sin_port = htons(port);
