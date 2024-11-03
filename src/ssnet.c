@@ -24,7 +24,7 @@
     }
 #endif
 
-#define DEF_READ_BUF_SIZE (1500)
+#define DEF_READ_BUF_SIZE (1024)
 
 struct ssnet_tcp_server_s {
     int listen_fd;
@@ -203,7 +203,9 @@ int ssnet_tcp_send(ssnet_t *net, int fd, const char *buf, int len) {
         _LOG("net_tcp_send again fd:%d len:%d", fd, len);
     } else if ((bytes == -1) && !((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
         /* error */
-        perror("net_tcp_send"); /* TODO: debug */
+        /* TODO: debug */
+        _LOG_E("net_tcp_send error fd:%d errno:%d %s", fd, errno, strerror(errno));
+        /* perror(msg);  */
         rt = -2;
     } else {
         /* ok */
@@ -365,7 +367,7 @@ int ssnet_udp_init(ssnet_t *net, const char *ip, unsigned short port, int is_bin
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (-1 == fd) return _ERR;
     struct sockaddr_in addr;
-    memset(&addr,0, sizeof(struct sockaddr_in));
+    bzero(&addr, sizeof(struct sockaddr_in));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr(ip);
     addr.sin_port = htons(port);
