@@ -234,7 +234,7 @@ static int on_connected(sspipe_t* pipe, int fd) {
 }
 
 static int on_writable(ssnet_t* net, int fd) {
-    _LOG("on_writable fd:%d", fd);
+    _LOG_W("on_writable fd:%d", fd);
     if (!pconn_is_exist(fd)) {
         _LOG("on_writable fd:%d does not exist, close", fd);
         ssnet_tcp_close(net, fd);
@@ -335,12 +335,12 @@ void sspipe_close_conn(sspipe_t* pipe, int fd) {
     pconn_set_status(fd, PCONN_ST_OFF);
     ssnet_tcp_close(pipe->net, fd);
     pconn_free(fd);
-    _LOG("sspipe_close_conn fd:%d type:%d st:%d", fd, type, st);
+    _LOG_W("sspipe_close_conn fd:%d type:%d st:%d", fd, type, st);
     if (cp_fd > 0) {
         pconn_set_status(cp_fd, PCONN_ST_OFF);
         ssnet_tcp_close(pipe->net, cp_fd);
         pconn_free(cp_fd);
-        _LOG("sspipe_close_conn cp_fd:%d cp_type:%d cp_st:%d", cp_fd, cp_type, cp_st);
+        _LOG_W("sspipe_close_conn cp_fd:%d cp_type:%d cp_st:%d", cp_fd, cp_type, cp_st);
     }
 }
 

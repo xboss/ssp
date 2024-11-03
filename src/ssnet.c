@@ -162,21 +162,21 @@ static int tcp_ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) 
             memset(net->read_buf, 0, net->read_buf_size); /* TODO: debug */
             ret = read(fd, net->read_buf, net->read_buf_size);
             if (ret == 0) {
-                _LOG("remove fd:%d", fd);
+                _LOG_W("tcp_ssev_cb close fd:%d", fd);
                 net->on_close(net, fd);
                 /* close(fd); */
                 break;
             } else if ((ret == -1) && ((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
-                _LOG("read EAGAIN fd:%d errno:%d", fd, errno);
+                _LOG_W("tcp_ssev_cb read EAGAIN fd:%d errno:%d", fd, errno);
                 break;
             } else if ((ret == -1) && !((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
                 /* _LOG_E( "read error, remove fd:%d errno:%d", fd, errno); */
-                _LOG("read error, remove fd:%d errno:%d", fd, errno);
+                _LOG_W("tcp_ssev_cb read error, close fd:%d errno:%d", fd, errno);
                 net->on_close(net, fd);
                 /* close(fd); */
                 break;
             } else {
-                _LOG("once read fd:%d ret:%d", fd, ret);
+                _LOG_W("once read fd:%d ret:%d", fd, ret);
                 net->on_recv(net, fd, net->read_buf, ret, NULL);
             }
         } while (ret >= net->read_buf_size);
@@ -197,10 +197,11 @@ int ssnet_tcp_send(ssnet_t *net, int fd, const char *buf, int len) {
     if (bytes == 0) {
         /* tcp close */
         rt = 0;
+        _LOG_W("net_tcp_send close fd:%d len:%d", fd, len);
     } else if ((bytes == -1) && ((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
         /* pending */
         rt = -1;
-        _LOG("net_tcp_send again fd:%d len:%d", fd, len);
+        _LOG_W("net_tcp_send again fd:%d len:%d", fd, len);
     } else if ((bytes == -1) && !((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
         /* error */
         /* TODO: debug */
@@ -210,6 +211,7 @@ int ssnet_tcp_send(ssnet_t *net, int fd, const char *buf, int len) {
     } else {
         /* ok */
         rt = bytes;
+        _LOG_W("net_tcp_send send ok. fd:%d len:%d", fd, rt);
     }
 
     return rt;
