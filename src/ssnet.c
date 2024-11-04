@@ -141,6 +141,11 @@ static int tcp_server_accept(ssnet_t *net) {
     if (new_fd == -1) {
         if (errno != EAGAIN && errno != ECONNABORTED && errno != EPROTO && errno != EINTR) perror("accept error");
         return _ERR;
+        /* TODO: fix and test */
+        /* if (errno != EAGAIN && errno != ECONNABORTED && errno != EPROTO && errno != EINTR) {
+            perror("accept error");
+            return _ERR;
+        } */
     }
     return _OK;
 }
