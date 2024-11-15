@@ -30,11 +30,12 @@ struct sspipe_s {
     int server_fd;
     char* key;
     /* pipe_recv_cb_t on_pipe_recv; */
-    pipe_accept_cb_t on_pipe_accept;
+    /* pipe_accept_cb_t on_pipe_accept; */
 };
 
 /* ---------- protocol ----------- */
 #define PACKET_HEAD_LEN 4
+#define MAX_PACKET_SIZE 1024
 
 static int pack(int payload_len, const char* payload, char** buf) {
     if (payload_len <= 0 || !payload) {
@@ -287,11 +288,11 @@ static void free_close_cb(int id, void* u) {
 
 /* ---------- api ----------- */
 
-sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_ip, unsigned short listen_port, const char* key, /* pipe_recv_cb_t on_pipe_recv, */ pipe_accept_cb_t on_pipe_accept) {
+sspipe_t* sspipe_init(ssev_loop_t* loop, const char* listen_ip, unsigned short listen_port, const char* key) {
     if (!listen_ip || listen_port <= 0) return NULL;
     sspipe_t* _ALLOC(pipe, sspipe_t*, sizeof(sspipe_t));
     memset(pipe, 0, sizeof(sspipe_t));
-    pipe->net = ssnet_init(loop, read_buf_size);
+    pipe->net = ssnet_init(loop, MAX_PACKET_SIZE);
     if (!pipe->net) {
         free(pipe);
         return NULL;
@@ -309,7 +310,7 @@ sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_i
     pipe->loop = loop;
     pipe->key = (char*)key;
     /* pipe->on_pipe_recv = on_pipe_recv; */
-    pipe->on_pipe_accept = on_pipe_accept;
+    /* pipe->on_pipe_accept = on_pipe_accept; */
     return pipe;
 }
 
