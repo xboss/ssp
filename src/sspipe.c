@@ -168,7 +168,7 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len, struct sockad
         }
 
         {
-            if (payload_len < 0 || payload_len > 65535) { /* TODO: debug */
+            if (payload_len < 0 || payload_len > 2048) { /* TODO: debug */
                 _LOG_E("on_recv payload_len:%d error rl:%d", payload_len, rl);
                 sspipe_close_conn(pipe, fd);
                 free(rbuf);
@@ -287,7 +287,8 @@ static void free_close_cb(int id, void* u) {
 
 /* ---------- api ----------- */
 
-sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_ip, unsigned short listen_port, const char* key, /* pipe_recv_cb_t on_pipe_recv, */ pipe_accept_cb_t on_pipe_accept) {
+sspipe_t* sspipe_init(ssev_loop_t* loop, int read_buf_size, const char* listen_ip, unsigned short listen_port,
+                      const char* key, /* pipe_recv_cb_t on_pipe_recv, */ pipe_accept_cb_t on_pipe_accept) {
     if (!listen_ip || listen_port <= 0) return NULL;
     sspipe_t* _ALLOC(pipe, sspipe_t*, sizeof(sspipe_t));
     memset(pipe, 0, sizeof(sspipe_t));
