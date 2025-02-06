@@ -167,19 +167,23 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len, struct sockad
             break;
         }
 
-        {
-            if (payload_len < 0 || payload_len > 2048) { /* TODO: debug */
-                _LOG_E("on_recv payload_len:%d error rl:%d", payload_len, rl);
-                sspipe_close_conn(pipe, fd);
-                free(rbuf);
-                return _OK;
-            }
+        if (payload_len < 0 || payload_len > 2048) { /* TODO: debug */
+            _LOG_E("on_recv payload_len:%d error rl:%d", payload_len, rl);
+            sspipe_close_conn(pipe, fd);
+            free(rbuf);
+            return _OK;
         }
 
         plain = p;
         plain_len = payload_len;
         if (pconn_is_secret(fd)) {
             plain = aes_decrypt(pipe->key, p, payload_len, &plain_len);
+            if (!plain) {
+                _LOG_E("aes_decrypt failed");
+                sspipe_close_conn(pipe, fd);
+                free(rbuf);
+                return _ERR;
+            }
             _LOG("decrypt ");
         }
         rt = sspipe_send(pipe, cp_fd, plain, plain_len);
