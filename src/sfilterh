@@ -1,0 +1,12 @@
+#ifndef _SFILTER_H
+#define _SFILTER_H
+
+#define _OK 0         /* 成功解析完整包且无剩余 */
+#define _ERR -1       /* 发生错误（参数/内存/非法数据） */
+#define _NEED_MORE -2 /* 需要接收更多数据（包头/包体不完整） */
+#define _HAS_NEXT -3  /* 已解析出完整包且还有后续数据待处理 */
+
+int sfilter_in(stream_buf_t* sb, const char* in, int in_len, char** out, int* out_len);
+/* int sfilter_out(int fd, const stream_buf_t* sb, char** out, int* out_len); */
+
+#endif /* SFILTER_H */

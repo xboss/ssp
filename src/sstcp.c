@@ -1,0 +1,267 @@
+#include "sstcp.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// 客户端线程函数
+#ifdef _WIN32
+DWORD WINAPI client_thread(LPVOID arg) {
+#else
+void *client_thread(void *arg) {
+#endif
+    int client_socket = *(int *)arg;
+    sstcp_client_thread_cb_t handler = (sstcp_client_thread_cb_t)(((void **)arg)[1]);
+
+    // 调用客户端处理函数
+    handler(client_socket);
+
+    // 关闭客户端套接字
+#ifdef _WIN32
+    closesocket(client_socket);
+#else
+    close(client_socket);
+#endif
+
+    free(arg);  // 释放动态分配的内存
+    return _OK;
+}
+
+// 创建服务器
+sstcp_server_t *sstcp_create_server(const char *bind_ip, int port, sstcp_client_thread_cb_t handler) {
+    if (!bind_ip || port <= 0 || !handler) {
+        return NULL;
+    }
+
+    sstcp_server_t *server = (sstcp_server_t *)calloc(1, sizeof(sstcp_server_t));
+    if (!server) return NULL;
+
+    server->port = port;
+    server->server_fd = -1;
+    server->running = 0;
+    server->handler = handler;
+    server->threads = NULL;
+
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        free(server);
+        return NULL;
+    }
+#endif
+
+    // 设置绑定IP
+    if (bind_ip) {
+        strncpy(server->bind_ip, bind_ip, INET_ADDRSTRLEN);
+        if (strnlen(server->bind_ip, INET_ADDRSTRLEN) == 0) {
+            free(server);
+            return NULL;
+        }
+    }
+
+    return server;
+}
+
+// 启动服务器
+int sstcp_start_server(sstcp_server_t *server) {
+    if (!server) {
+        return _ERR;
+    }
+
+    struct sockaddr_in address;
+    int addrlen = sizeof(address);
+
+    // 创建套接字
+    if ((server->server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("Socket failed");
+        return _ERR;
+    }
+
+    // 绑定套接字
+    address.sin_family = AF_INET;
+    address.sin_port = htons(server->port);
+    if (strnlen(server->bind_ip, INET_ADDRSTRLEN) == 0)
+        address.sin_addr.s_addr = INADDR_ANY;
+    else
+        address.sin_addr.s_addr = inet_addr(server->bind_ip);
+
+    if (bind(server->server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("Bind failed");
+        return _ERR;
+    }
+
+    // 监听
+    if (listen(server->server_fd, 10) < 0) {
+        perror("Listen failed");
+        return _ERR;
+    }
+
+    printf("Server is listening on port %d\n", server->port);
+    server->running = 1;
+
+    while (server->running) {
+        // 接受连接
+        int new_socket;
+        if ((new_socket = accept(server->server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0) {
+            perror("Accept failed");
+            continue;
+        }
+
+        printf("New client connected\n");
+
+        // 为每个客户端创建一个线程
+        void **arg = (void **)malloc(2 * sizeof(void *));
+        arg[0] = (void *)(intptr_t)new_socket;
+        arg[1] = (void *)server->handler;
+
+#ifdef _WIN32
+        HANDLE thread = CreateThread(NULL, 0, client_thread, arg, 0, NULL);
+        if (thread == NULL) {
+            perror("Thread creation failed");
+            free(arg);
+        }
+#else
+        pthread_t thread_id;
+        if (pthread_create(&thread_id, NULL, client_thread, arg) != 0) {
+            perror("Thread creation failed");
+            free(arg);
+        }
+        pthread_detach(thread_id);  // 分离线程，避免资源泄漏
+#endif
+    }
+
+    return _OK;
+}
+
+// 停止服务器
+void sstcp_stop_server(sstcp_server_t *server) {
+    server->running = 0;
+#ifdef _WIN32
+    closesocket(server->server_fd);
+#else
+    close(server->server_fd);
+#endif
+}
+
+// 释放服务器资源
+void sstcp_free_server(sstcp_server_t *server) {
+    if (server) {
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        free(server);
+    }
+}
+
+// 创建客户端
+sstcp_client_t *sstcp_create_client() {
+    sstcp_client_t *client = (sstcp_client_t *)malloc(sizeof(sstcp_client_t));
+    if (!client) return NULL;
+
+    client->client_fd = -1;
+    memset(&client->server_addr, 0, sizeof(client->server_addr));
+
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        free(client);
+        return NULL;
+    }
+#endif
+
+    return client;
+}
+
+// 连接到服务器
+int sstcp_connect(sstcp_client_t *client, const char *server_ip, int port) {
+    // 创建套接字
+    if ((client->client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("Socket creation failed");
+        return _ERR;
+    }
+
+    // 设置服务器地址
+    client->server_addr.sin_family = AF_INET;
+    client->server_addr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, server_ip, &client->server_addr.sin_addr) <= 0) {
+        perror("Invalid address/Address not supported");
+        return _ERR;
+    }
+
+    // 连接到服务器
+    if (connect(client->client_fd, (struct sockaddr *)&client->server_addr, sizeof(client->server_addr)) < 0) {
+        perror("Connection failed");
+        return _ERR;
+    }
+
+    printf("Connected to server at %s:%d\n", server_ip, port);
+    return _OK;
+}
+
+// 发送数据
+int sstcp_send(int fd, const char *data, int length) { return send(fd, data, length, 0); }
+
+// 接收数据
+int sstcp_receive(int fd, char *buffer, int length) { return recv(fd, buffer, length, 0); }
+
+// 关闭客户端连接
+void sstcp_close_client(sstcp_client_t *client) {
+#ifdef _WIN32
+    closesocket(client->client_fd);
+#else
+    close(client->client_fd);
+#endif
+}
+
+// 释放客户端资源
+void sstcp_free_client(sstcp_client_t *client) {
+    if (client) {
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        free(client);
+    }
+}
+
+// 设置发送超时时间
+int sstcp_set_send_timeout(int fd, int timeout_ms) {
+    if (fd < 0 || timeout_ms < 0) {
+        return _ERR;
+    }
+    // client->send_timeout = timeout_ms;
+#ifdef _WIN32
+    DWORD timeout = timeout_ms;
+#else
+    struct timeval timeout;
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+#endif
+
+    if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeout, sizeof(timeout)) < 0) {
+        perror("Failed to set send timeout");
+        return _ERR;
+    }
+    return _OK;
+}
+
+// 设置接收超时时间
+int sstcp_set_recv_timeout(int fd, int timeout_ms) {
+    if (fd < 0 || timeout_ms < 0) {
+        return _ERR;
+    }
+    // client->recv_timeout = timeout_ms;
+#ifdef _WIN32
+    DWORD timeout = timeout_ms;
+#else
+    struct timeval timeout;
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+#endif
+
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)) < 0) {
+        perror("Failed to set receive timeout");
+        return _ERR;
+    }
+    return _OK;
+}
