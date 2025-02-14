@@ -65,9 +65,6 @@ sstcp_client_t *sstcp_create_client();
 // 连接到服务器
 int sstcp_connect(sstcp_client_t *client, const char *server_ip, int port);
 
-// 关闭客户端连接
-void sstcp_close_client(sstcp_client_t *client);
-
 // 释放客户端资源
 void sstcp_free_client(sstcp_client_t *client);
 
@@ -82,5 +79,8 @@ int sstcp_set_send_timeout(int fd, int timeout_ms);
 
 // 设置接收超时时间
 int sstcp_set_recv_timeout(int fd, int timeout_ms);
+
+// 关闭连接
+void sstcp_close(int fd);
 
 #endif /* _SSTCP_H */

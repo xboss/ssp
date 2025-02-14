@@ -101,18 +101,20 @@ int sstcp_start_server(sstcp_server_t *server) {
         return _ERR;
     }
 
-    printf("Server is listening on port %d\n", server->port);
+    _LOG("Server is listening on port %d server_fd %d", server->port, server->server_fd);
     server->running = 1;
 
     while (server->running) {
         // 接受连接
         int new_socket;
         if ((new_socket = accept(server->server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0) {
+            _LOG_E("Accept failed server_fd %d new_socket %d", server->server_fd, new_socket);
             perror("Accept failed");
             continue;
+            /* TODO: */
         }
 
-        printf("New client connected\n");
+        _LOG("New client connected fd:%d", new_socket);
 
         // 为每个客户端创建一个线程
         void **arg = (void **)malloc(2 * sizeof(void *));
@@ -200,7 +202,7 @@ int sstcp_connect(sstcp_client_t *client, const char *server_ip, int port) {
         return _ERR;
     }
 
-    printf("Connected to server at %s:%d\n", server_ip, port);
+    _LOG("Connected to server at %s:%d", server_ip, port);
     return _OK;
 }
 
@@ -209,15 +211,6 @@ int sstcp_send(int fd, const char *data, int length) { return send(fd, data, len
 
 // 接收数据
 int sstcp_receive(int fd, char *buffer, int length) { return recv(fd, buffer, length, 0); }
-
-// 关闭客户端连接
-void sstcp_close_client(sstcp_client_t *client) {
-#ifdef _WIN32
-    closesocket(client->client_fd);
-#else
-    close(client->client_fd);
-#endif
-}
 
 // 释放客户端资源
 void sstcp_free_client(sstcp_client_t *client) {
@@ -269,4 +262,14 @@ int sstcp_set_recv_timeout(int fd, int timeout_ms) {
         return _ERR;
     }
     return _OK;
+}
+
+// 关闭连接
+void sstcp_close(int fd) {
+#ifdef _WIN32
+    closesocket(fd);
+#else
+    close(fd);
+#endif
+    _LOG("close tcp connection fd:%d", fd);
 }

@@ -77,18 +77,23 @@ void handle_client(int client_socket, sstcp_server_t* server) {
     assert(pipe);
 
     char buffer[1024] = {0};
-    char* hello = "Hello from server";
+    // char* hello = "Hello from server";
 
     // 读取客户端数据
-    int valread = sstcp_receive(client_socket, buffer, 1024);
-    if (valread > 0) {
-        printf("Received: %s\n", buffer);
-
-        // 发送响应
-        sstcp_send(client_socket, hello, strlen(hello));
-        printf("Hello message sent to client\n");
-    } else {
-        perror("recv failed");
+    int valread = 0;
+    while (server->running) {
+        valread = sstcp_receive(client_socket, buffer, 1024);
+        if (valread > 0) {
+            _LOG("Received: %s", buffer);
+            // 发送响应
+            // sstcp_send(client_socket, hello, strlen(hello));
+            sstcp_send(client_socket, buffer, valread);
+            _LOG("Hello message sent to client");
+        } else {
+            perror("recv failed");
+            // sstcp_close(client_socket);
+            break;
+        }
     }
 
     /* TODO: */
