@@ -70,7 +70,12 @@
 
 /* ---------- callback ----------- */
 
-void handle_client(int client_socket) {
+void handle_client(int client_socket, sstcp_server_t* server) {
+    assert(client_socket >= 0);
+    assert(server);
+    sspipe_t* pipe = (sspipe_t*)server->user_data;
+    assert(pipe);
+
     char buffer[1024] = {0};
     char* hello = "Hello from server";
 
@@ -94,15 +99,14 @@ void handle_client(int client_socket) {
 sspipe_t* sspipe_init(ssconfig_t* conf) {
     if (!conf) return NULL;
 
-    sstcp_server_t* server = sstcp_create_server(conf->listen_ip, conf->listen_port, handle_client);
-    if (!server) {
-        _LOG_E("create tcp server error.");
-        return NULL;
-    }
-
     sspipe_t* pipe = (sspipe_t*)calloc(1, sizeof(sspipe_t));
     if (pipe == NULL) {
-        sstcp_free_server(server);
+        return NULL;
+    }
+    sstcp_server_t* server = sstcp_create_server(conf->listen_ip, conf->listen_port, handle_client, pipe);
+    if (!server) {
+        _LOG_E("create tcp server error.");
+        sspipe_free(pipe);
         return NULL;
     }
     pipe->server = server;
@@ -113,7 +117,10 @@ sspipe_t* sspipe_init(ssconfig_t* conf) {
 
 void sspipe_free(sspipe_t* pipe) {
     if (!pipe) return;
-    /* TODO: */
+    if (pipe->server) {
+        sstcp_free_server(pipe->server);
+        pipe->server = NULL;
+    }
     free(pipe);
     _LOG("sspipe free ok.");
 }

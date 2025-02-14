@@ -18,23 +18,26 @@
 #include <pthread.h>
 #endif
 
-// 回调函数类型定义
-typedef void (*sstcp_client_thread_cb_t)(int client_socket);
-
 // 定义服务器结构体
-typedef struct {
+typedef struct sstcp_server_s sstcp_server_t;
+
+// 回调函数类型定义
+typedef void (*sstcp_client_thread_cb_t)(int client_socket, sstcp_server_t *server);
+
+struct sstcp_server_s {
     int port;                           // 服务器端口
     int server_fd;                      // 服务器套接字描述符
     volatile int running;               // 服务器运行状态
     char bind_ip[INET_ADDRSTRLEN + 1];  // 绑定的IP地址
     sstcp_client_thread_cb_t handler;   // 客户端处理函数
+    void *user_data;
     /* TODO: threads 未使用 */
 #ifdef _WIN32
     HANDLE *threads;  // Windows 线程句柄数组
 #else
     pthread_t *threads;  // POSIX 线程数组
 #endif
-} sstcp_server_t;
+};
 
 // 定义客户端结构体
 typedef struct {
@@ -45,7 +48,7 @@ typedef struct {
 } sstcp_client_t;
 
 // 初始化服务器
-sstcp_server_t *sstcp_create_server(const char *bind_ip, int port, sstcp_client_thread_cb_t handler);
+sstcp_server_t *sstcp_create_server(const char *bind_ip, int port, sstcp_client_thread_cb_t handler, void *user_data);
 
 // 启动服务器
 int sstcp_start_server(sstcp_server_t *server);

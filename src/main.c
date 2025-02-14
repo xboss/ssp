@@ -20,7 +20,7 @@ static int load_conf(const char* conf_file, ssconfig_t* conf) {
     ssconf_t* cf = ssconf_init(keys, keys_cnt);
     assert(cf);
     int rt = ssconf_load(cf, conf_file);
-    if (rt != 0) return -1;
+    if (rt != 0) return _ERR;
     conf->log_level = SSLOG_LEVEL_ERROR;
     char* v = NULL;
     int i;
@@ -89,25 +89,25 @@ static int load_conf(const char* conf_file, ssconfig_t* conf) {
     }
     ssconf_free(cf);
     printf("------------\n");
-    return 0;
+    return _OK;
 }
 
 static int check_config(ssconfig_t* conf) {
     if (conf->listen_port > 65535) {
         fprintf(stderr, "Invalid listen_port:%u in configfile.\n", conf->listen_port);
-        return -1;
+        return _ERR;
     }
     if (conf->mode == SSPIPE_MODE_LOCAL || conf->mode == SSPIPE_MODE_REMOTE) {
         if (conf->target_port > 65535) {
             fprintf(stderr, "Invalid target_port:%u in configfile.\n", conf->target_port);
-            return -1;
+            return _ERR;
         }
     }
     if (conf->mode != SSPIPE_MODE_LOCAL && conf->mode != SSPIPE_MODE_REMOTE) {
         fprintf(stderr, "Invalid mode:%d in configfile. local mode is 'local', remote mode is 'remote'.\n", conf->mode);
-        return -1;
+        return _ERR;
     }
-    return 0;
+    return _OK;
 }
 
 int main(int argc, char const* argv[]) {
@@ -117,7 +117,7 @@ int main(int argc, char const* argv[]) {
     }
     memset(&g_conf, 0, sizeof(ssconfig_t));
     int rt = load_conf(argv[1], &g_conf);
-    if (rt != 0) return 1;
+    if (rt != _OK) return 1;
     if (check_config(&g_conf) != 0) return 1;
     sslog_init(g_conf.log_file, g_conf.log_level);
     if (g_conf.log_file) free(g_conf.log_file);
@@ -128,6 +128,10 @@ int main(int argc, char const* argv[]) {
         return 1;
     }
 
+    rt = sstcp_start_server(g_pipe->server);
+    if (rt != _OK) {
+        _LOG_E("start server error.");
+    }
     sspipe_free(g_pipe);
     _LOG("Bye");
     sslog_free();

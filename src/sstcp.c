@@ -1,5 +1,6 @@
 #include "sstcp.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,16 +12,19 @@ DWORD WINAPI client_thread(LPVOID arg) {
 void *client_thread(void *arg) {
 #endif
     int client_socket = *(int *)arg;
-    sstcp_client_thread_cb_t handler = (sstcp_client_thread_cb_t)(((void **)arg)[1]);
+    sstcp_server_t *server = (sstcp_server_t *)(((void **)arg)[1]);
+    assert(server);
+    assert(server->handler);
+    assert(client_socket >= 0);
 
     // 调用客户端处理函数
-    handler(client_socket);
+    server->handler(client_socket, server);
 
     // 关闭客户端套接字
 #ifdef _WIN32
-    closesocket(client_socket);
+    closesocket(server->server_fd);
 #else
-    close(client_socket);
+    close(server->server_fd);
 #endif
 
     free(arg);  // 释放动态分配的内存
@@ -28,7 +32,7 @@ void *client_thread(void *arg) {
 }
 
 // 创建服务器
-sstcp_server_t *sstcp_create_server(const char *bind_ip, int port, sstcp_client_thread_cb_t handler) {
+sstcp_server_t *sstcp_create_server(const char *bind_ip, int port, sstcp_client_thread_cb_t handler, void *user_data) {
     if (!bind_ip || port <= 0 || !handler) {
         return NULL;
     }
@@ -40,6 +44,7 @@ sstcp_server_t *sstcp_create_server(const char *bind_ip, int port, sstcp_client_
     server->server_fd = -1;
     server->running = 0;
     server->handler = handler;
+    server->user_data = user_data;
     server->threads = NULL;
 
 #ifdef _WIN32
@@ -112,7 +117,7 @@ int sstcp_start_server(sstcp_server_t *server) {
         // 为每个客户端创建一个线程
         void **arg = (void **)malloc(2 * sizeof(void *));
         arg[0] = (void *)(intptr_t)new_socket;
-        arg[1] = (void *)server->handler;
+        arg[1] = (void *)server;
 
 #ifdef _WIN32
         HANDLE thread = CreateThread(NULL, 0, client_thread, arg, 0, NULL);
