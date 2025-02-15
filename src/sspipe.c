@@ -75,9 +75,23 @@ void handle_client(int client_socket, sstcp_server_t* server) {
     sspipe_t* pipe = (sspipe_t*)server->user_data;
     assert(pipe);
 
+    _LOG("handle_client accept: %d", client_socket);
+    sstcp_client_t *client = sstcp_create_client();
+    if (!client) {
+        perror("create client failed");
+        return;
+    }
+    
+    int rt = sstcp_connect(client, pipe->conf->target_ip, pipe->conf->target_port);
+    if (rt != _OK) {
+        _LOG_E("connect to target failed. %d %s:%d", client->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
+        perror("connect to target failed");
+        sstcp_free_client(client);
+        return;
+    }
+
     char buffer[1024] = {0};
     // char* hello = "Hello from server";
-
     // 读取客户端数据
     int valread = 0;
     while (server->running) {
@@ -87,13 +101,14 @@ void handle_client(int client_socket, sstcp_server_t* server) {
             // 发送响应
             // sstcp_send(client_socket, hello, strlen(hello));
             sstcp_send(client_socket, buffer, valread);
+            sstcp_send(client->client_fd, buffer, valread);
             _LOG("Hello message sent to client");
         } else {
             perror("recv failed");
-            // sstcp_close(client_socket);
             break;
         }
     }
+    sstcp_free_client(client);
 
     /* TODO: */
 }

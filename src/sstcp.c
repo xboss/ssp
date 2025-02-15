@@ -5,6 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void setreuseaddr(int fd) {
+    int reuse = 1;
+    if (-1 == setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse))) {
+        perror("set reuse addr error");
+    }
+}
+
 // 客户端线程函数
 #ifdef _WIN32
 DWORD WINAPI client_thread(LPVOID arg) {
@@ -21,12 +28,7 @@ void *client_thread(void *arg) {
     server->handler(client_socket, server);
 
     // 关闭客户端套接字
-#ifdef _WIN32
-    closesocket(server->server_fd);
-#else
-    close(server->server_fd);
-#endif
-
+    sstcp_close(client_socket);
     free(arg);  // 释放动态分配的内存
     return _OK;
 }
@@ -81,6 +83,8 @@ int sstcp_start_server(sstcp_server_t *server) {
         perror("Socket failed");
         return _ERR;
     }
+
+    setreuseaddr(server->server_fd);
 
     // 绑定套接字
     address.sin_family = AF_INET;
