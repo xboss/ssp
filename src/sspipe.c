@@ -67,7 +67,116 @@
 //     return pk_buf;
 // }
 
+void echo(int client_socket, sstcp_server_t* server) {
+    char buffer[1024] = {0};
+    // char* hello = "Hello from server";
+    // 读取客户端数据
+    int valread = 0;
+    while (server->running) {
+        memset(buffer, 0, sizeof(buffer));
+        valread = sstcp_receive(client_socket, buffer, 1024);
+        if (valread > 0) {
+            _LOG("Received: %s", buffer);
+            // 发送响应
+            // sstcp_send(client_socket, hello, strlen(hello));
+            sstcp_send(client_socket, buffer, valread);
+            _LOG("Hello message sent to client");
+        } else {
+            perror("recv failed");
+            break;
+        }
+    }
+}
+
 /* ---------- callback ----------- */
+
+typedef struct {
+    char* buf;             // 动态缓冲区
+    int len;               // 当前缓冲长度
+    int cap;               // 缓冲区容量
+    uint32_t max_payload;  // 允许的最大负载长度（可配置）
+} ssbuffer_t;
+
+static ssbuffer_t* ssbuffer_create(uint32_t max_payload) {
+    ssbuffer_t* ssb = (ssbuffer_t*)calloc(1, sizeof(ssbuffer_t));
+    if (!ssb) {
+        return NULL;
+    }
+    ssb->max_payload = max_payload;
+    return ssb;
+}
+
+static void ssbuffer_free(ssbuffer_t* ssb) {
+    if (ssb) {
+        if (ssb->buf) {
+            free(ssb->buf);
+            ssb->buf = NULL;
+        }
+        free(ssb);
+    }
+}
+
+static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
+    if (ssb->len + len > ssb->cap) {
+        int new_cap = ssb->cap * 3 / 2;
+        if (new_cap < ssb->len + len) {
+            new_cap = ssb->len + len;
+        }
+        char* new_buf = (char*)calloc(1, new_cap);
+        if (!new_buf) {
+            return _ERR;
+        }
+        if (ssb->buf) {
+            memcpy(new_buf, ssb->buf, ssb->len);
+            free(ssb->buf);
+        }
+        ssb->buf = new_buf;
+        ssb->cap = new_cap;
+    }
+    return _OK;
+}
+
+/**
+ * @brief 
+ * @param ssb 
+ * @param client 
+ * @return 0: ok, 1: need more data (continue), -1: error(break)
+ */
+int handle_remote(ssbuffer_t* ssb, sstcp_client_t* client) {
+    assert(ssb);
+    assert(client);
+    int rt = 0;
+    uint32_t payload_len = 0;
+    int remaining = 0;
+    while (ssb->len > 0) {
+        if (ssb->len < PACKET_HEAD_LEN) return 1;
+        payload_len = ntohl(*(uint32_t*)ssb->buf);
+        if (payload_len > ssb->max_payload || payload_len <= 0) {
+            _LOG_E("payload_len:%d error. max_payload:%d", payload_len, ssb->max_payload);
+            return -1;
+        }
+        if (ssb->len < payload_len + PACKET_HEAD_LEN) return 1;
+
+        /* TODO: crypt */
+
+        rt = sstcp_send(client->client_fd, ssb->buf, payload_len + PACKET_HEAD_LEN);
+        if (rt < 0) {
+            perror("send to target failed");
+            return -1;
+        }
+        _LOG("send to target ok.");
+
+        remaining = ssb->len - (payload_len + PACKET_HEAD_LEN);
+        assert(remaining >= 0);
+        if (remaining > 0) {
+            memmove(ssb->buf, ssb->buf + payload_len + PACKET_HEAD_LEN, remaining);
+        }
+        ssb->len = remaining;
+    }
+    return 0;
+}
+
+void handle_local() {}
 
 void handle_client(int client_socket, sstcp_server_t* server) {
     assert(client_socket >= 0);
@@ -76,12 +185,12 @@ void handle_client(int client_socket, sstcp_server_t* server) {
     assert(pipe);
 
     _LOG("handle_client accept: %d", client_socket);
-    sstcp_client_t *client = sstcp_create_client();
+    sstcp_client_t* client = sstcp_create_client();
     if (!client) {
         perror("create client failed");
         return;
     }
-    
+
     int rt = sstcp_connect(client, pipe->conf->target_ip, pipe->conf->target_port);
     if (rt != _OK) {
         _LOG_E("connect to target failed. %d %s:%d", client->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
@@ -90,24 +199,44 @@ void handle_client(int client_socket, sstcp_server_t* server) {
         return;
     }
 
-    char buffer[1024] = {0};
-    // char* hello = "Hello from server";
+    ssbuffer_t* ssb = ssbuffer_create(MAX_PAYLOAD_LEN);
+    if (!ssb) {
+        perror("create ssbuffer failed");
+        sstcp_close(client->client_fd);
+        sstcp_free_client(client);
+        return;
+    }
+
+    char buffer[PACKET_HEAD_LEN + MAX_PAYLOAD_LEN] = {0};
     // 读取客户端数据
-    int valread = 0;
+    int rlen = 0;
     while (server->running) {
-        valread = sstcp_receive(client_socket, buffer, 1024);
-        if (valread > 0) {
-            _LOG("Received: %s", buffer);
-            // 发送响应
-            // sstcp_send(client_socket, hello, strlen(hello));
-            sstcp_send(client_socket, buffer, valread);
-            sstcp_send(client->client_fd, buffer, valread);
-            _LOG("Hello message sent to client");
-        } else {
+        rlen = sstcp_receive(client_socket, buffer, sizeof(buffer));
+        if (rlen <= 0) {
             perror("recv failed");
             break;
         }
+        _LOG("Received: %d", rlen);
+        rt = ssbuffer_grow(ssb, rlen);
+        if (rt != _OK) {
+            _LOG_E("ssbuffer_grow failed");
+            break;
+        }
+        memcpy(ssb->buf + ssb->len, buffer, rlen);
+        ssb->len += rlen;
+
+   /* TODO: */
+        rt = handle_remote(ssb, client);
+        if (rt == -1) {
+            _LOG_E("handle_remote error.");
+            break;
+        } else if (rt == 1) {
+            _LOG("need more data.");
+            continue;
+        }
     }
+    ssbuffer_free(ssb);
+    sstcp_close(client->client_fd);
     sstcp_free_client(client);
 
     /* TODO: */
