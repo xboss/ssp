@@ -14,9 +14,9 @@ static void setreuseaddr(int fd) {
 
 // 客户端线程函数
 #ifdef _WIN32
-DWORD WINAPI client_thread(LPVOID arg) {
+static DWORD WINAPI client_thread(LPVOID arg) {
 #else
-void *client_thread(void *arg) {
+static void *client_thread(void *arg) {
 #endif
     int client_socket = *(int *)arg;
     sstcp_server_t *server = (sstcp_server_t *)(((void **)arg)[1]);

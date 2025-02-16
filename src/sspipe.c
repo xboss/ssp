@@ -88,21 +88,17 @@ void echo(int client_socket, sstcp_server_t* server) {
     }
 }
 
-/* ---------- callback ----------- */
-
 typedef struct {
-    char* buf;             // 动态缓冲区
-    int len;               // 当前缓冲长度
-    int cap;               // 缓冲区容量
-    uint32_t max_payload;  // 允许的最大负载长度（可配置）
+    char* buf;  // 动态缓冲区
+    int len;    // 当前缓冲长度
+    int cap;    // 缓冲区容量
 } ssbuffer_t;
 
-static ssbuffer_t* ssbuffer_create(uint32_t max_payload) {
+static ssbuffer_t* ssbuffer_create() {
     ssbuffer_t* ssb = (ssbuffer_t*)calloc(1, sizeof(ssbuffer_t));
     if (!ssb) {
         return NULL;
     }
-    ssb->max_payload = max_payload;
     return ssb;
 }
 
@@ -136,6 +132,44 @@ static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
     return _OK;
 }
 
+#ifdef _WIN32
+static DWORD WINAPI backend_thread(LPVOID arg) {
+#else
+static void *backend_thread(void *arg) {
+#endif
+    sstcp_client_t* backend = (sstcp_server_t *)(((void **)arg)[0]);
+    sspipe_t* pipe = (sstcp_server_t *)(((void **)arg)[1]);
+    assert(backend);
+    assert(pipe);
+
+    /* TODO: */
+
+    free(arg);  // 释放动态分配的内存
+    return _OK;
+}
+
+static int run_backend(sspipe_t* pipe, sstcp_client_t* backend) {
+    // 为每个客户端创建一个线程
+    void** arg = (void**)malloc(2 * sizeof(void*));
+    arg[0] = (void*)backend;
+    arg[1] = (void*)pipe;
+
+#ifdef _WIN32
+    HANDLE thread = CreateThread(NULL, 0, backend_thread, arg, 0, NULL);
+    if (thread == NULL) {
+        perror("Thread creation failed");
+        free(arg);
+    }
+#else
+    pthread_t thread_id;
+    if (pthread_create(&thread_id, NULL, backend_thread, arg) != 0) {
+        perror("Thread creation failed");
+        free(arg);
+    }
+    pthread_detach(thread_id);  // 分离线程，避免资源泄漏
+#endif
+}
+
 /**
  * @brief
  * @param ssb
@@ -159,7 +193,7 @@ int handle_remote(ssbuffer_t* ssb, sstcp_client_t* client) {
 
         /* TODO: decrypt */
 
-        rt = sstcp_send(client->client_fd, ssb->buf +4, payload_len);
+        rt = sstcp_send(client->client_fd, ssb->buf + 4, payload_len);
         if (rt < 0) {
             perror("send to target failed");
             return -1;
@@ -176,48 +210,71 @@ int handle_remote(ssbuffer_t* ssb, sstcp_client_t* client) {
     return 0;
 }
 
-void handle_local(ssbuffer_t* ssb, sstcp_client_t* client) {
-    assert(ssb);
-    assert(client);
+/**
+ * @brief
+ * @param ssb
+ * @param client
+ * @return 0: ok, 1: need more data (continue), -1: error(break)
+ */
+int handle_local(sstcp_client_t* backend, const char* buf, int len) {
+    assert(backend);
+    assert(buf);
+    assert(len > 0);
+
     int rt = 0;
     uint32_t payload_len = 0;
-    int remaining = 0;
-    while (ssb->len > 0) {
-        /* TODO: pack */
-
+    int remaining = len;
+    while (remaining > 0) {
         /* TODO: encrypt */
 
-        /* TODO: send */
+        // pack and send
+        payload_len = remaining > MAX_PAYLOAD_LEN ? MAX_PAYLOAD_LEN : remaining;
+        uint32_t payload_len_net = htonl(payload_len);
+        rt = sstcp_send(backend->client_fd, (char*)&payload_len_net, PACKET_HEAD_LEN);
+        if (rt < 0) {
+            _LOG_E("send to target failed");
+            return -1;
+        }
+        rt = sstcp_send(backend->client_fd, buf - (len - remaining), payload_len);
+        if (rt < 0) {
+            _LOG_E("send to target failed");
+            return -1;
+        }
+        _LOG("send to target ok.");
+        assert(rt == payload_len);
+
+        remaining = remaining - payload_len;
+        assert(remaining >= 0);
     }
     return 0;
 }
 
-void handle_client(int client_socket, sstcp_server_t* server) {
-    assert(client_socket >= 0);
+void handle_client(int front_fd, sstcp_server_t* server) {
+    assert(front_fd >= 0);
     assert(server);
     sspipe_t* pipe = (sspipe_t*)server->user_data;
     assert(pipe);
 
-    _LOG("handle_client accept: %d", client_socket);
-    sstcp_client_t* client = sstcp_create_client();
-    if (!client) {
+    _LOG("handle_client accept: %d", front_fd);
+    sstcp_client_t* backend = sstcp_create_client();
+    if (!backend) {
         perror("create client failed");
         return;
     }
 
-    int rt = sstcp_connect(client, pipe->conf->target_ip, pipe->conf->target_port);
+    int rt = sstcp_connect(backend, pipe->conf->target_ip, pipe->conf->target_port);
     if (rt != _OK) {
-        _LOG_E("connect to target failed. %d %s:%d", client->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
+        _LOG_E("connect to target failed. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
         perror("connect to target failed");
-        sstcp_free_client(client);
+        sstcp_free_client(backend);
         return;
     }
 
     ssbuffer_t* ssb = ssbuffer_create(MAX_PAYLOAD_LEN);
     if (!ssb) {
         perror("create ssbuffer failed");
-        sstcp_close(client->client_fd);
-        sstcp_free_client(client);
+        sstcp_close(backend->client_fd);
+        sstcp_free_client(backend);
         return;
     }
 
@@ -225,12 +282,13 @@ void handle_client(int client_socket, sstcp_server_t* server) {
     // 读取客户端数据
     int rlen = 0;
     while (server->running) {
-        rlen = sstcp_receive(client_socket, buffer, sizeof(buffer));
+        rlen = sstcp_receive(front_fd, buffer, sizeof(buffer));
         if (rlen <= 0) {
             perror("recv failed");
             break;
         }
         _LOG("Received: %d", rlen);
+
         rt = ssbuffer_grow(ssb, rlen);
         if (rt != _OK) {
             _LOG_E("ssbuffer_grow failed");
@@ -240,9 +298,16 @@ void handle_client(int client_socket, sstcp_server_t* server) {
         ssb->len += rlen;
 
         if (pipe->conf->mode == SSPIPE_MODE_LOCAL) {
-            /* TODO: */
+            rt = handle_local(backend, buffer, rlen);
+            if (rt == -1) {
+                _LOG_E("handle_remote error.");
+                break;
+            } else if (rt == 1) {
+                _LOG("need more data.");
+                continue;
+            }
         } else if (pipe->conf->mode == SSPIPE_MODE_REMOTE) {
-            rt = handle_remote(ssb, client);
+            rt = handle_remote(ssb, backend);
             if (rt == -1) {
                 _LOG_E("handle_remote error.");
                 break;
@@ -256,8 +321,8 @@ void handle_client(int client_socket, sstcp_server_t* server) {
         }
     }
     ssbuffer_free(ssb);
-    sstcp_close(client->client_fd);
-    sstcp_free_client(client);
+    sstcp_close(backend->client_fd);
+    sstcp_free_client(backend);
 
     /* TODO: */
 }
