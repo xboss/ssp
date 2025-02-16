@@ -137,9 +137,9 @@ static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
 }
 
 /**
- * @brief 
- * @param ssb 
- * @param client 
+ * @brief
+ * @param ssb
+ * @param client
  * @return 0: ok, 1: need more data (continue), -1: error(break)
  */
 int handle_remote(ssbuffer_t* ssb, sstcp_client_t* client) {
@@ -157,9 +157,9 @@ int handle_remote(ssbuffer_t* ssb, sstcp_client_t* client) {
         }
         if (ssb->len < payload_len + PACKET_HEAD_LEN) return 1;
 
-        /* TODO: crypt */
+        /* TODO: decrypt */
 
-        rt = sstcp_send(client->client_fd, ssb->buf, payload_len + PACKET_HEAD_LEN);
+        rt = sstcp_send(client->client_fd, ssb->buf +4, payload_len);
         if (rt < 0) {
             perror("send to target failed");
             return -1;
@@ -176,7 +176,21 @@ int handle_remote(ssbuffer_t* ssb, sstcp_client_t* client) {
     return 0;
 }
 
-void handle_local() {}
+void handle_local(ssbuffer_t* ssb, sstcp_client_t* client) {
+    assert(ssb);
+    assert(client);
+    int rt = 0;
+    uint32_t payload_len = 0;
+    int remaining = 0;
+    while (ssb->len > 0) {
+        /* TODO: pack */
+
+        /* TODO: encrypt */
+
+        /* TODO: send */
+    }
+    return 0;
+}
 
 void handle_client(int client_socket, sstcp_server_t* server) {
     assert(client_socket >= 0);
@@ -225,14 +239,20 @@ void handle_client(int client_socket, sstcp_server_t* server) {
         memcpy(ssb->buf + ssb->len, buffer, rlen);
         ssb->len += rlen;
 
-   /* TODO: */
-        rt = handle_remote(ssb, client);
-        if (rt == -1) {
-            _LOG_E("handle_remote error.");
+        if (pipe->conf->mode == SSPIPE_MODE_LOCAL) {
+            /* TODO: */
+        } else if (pipe->conf->mode == SSPIPE_MODE_REMOTE) {
+            rt = handle_remote(ssb, client);
+            if (rt == -1) {
+                _LOG_E("handle_remote error.");
+                break;
+            } else if (rt == 1) {
+                _LOG("need more data.");
+                continue;
+            }
+        } else {
+            _LOG_E("invalid mode:%d", pipe->conf->mode);
             break;
-        } else if (rt == 1) {
-            _LOG("need more data.");
-            continue;
         }
     }
     ssbuffer_free(ssb);
