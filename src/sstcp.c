@@ -30,7 +30,7 @@ static void *client_thread(void *arg) {
     // 关闭客户端套接字
     sstcp_close(client_socket);
     free(arg);  // 释放动态分配的内存
-    return _OK;
+    return 0;
 }
 
 // 创建服务器
@@ -115,7 +115,6 @@ int sstcp_start_server(sstcp_server_t *server) {
             _LOG_E("Accept failed server_fd %d new_socket %d", server->server_fd, new_socket);
             perror("Accept failed");
             continue;
-            /* TODO: */
         }
 
         _LOG("New client connected fd:%d", new_socket);
@@ -130,17 +129,18 @@ int sstcp_start_server(sstcp_server_t *server) {
         if (thread == NULL) {
             perror("Thread creation failed");
             free(arg);
+            continue;
         }
 #else
         pthread_t thread_id;
         if (pthread_create(&thread_id, NULL, client_thread, arg) != 0) {
             perror("Thread creation failed");
             free(arg);
+            continue;
         }
         pthread_detach(thread_id);  // 分离线程，避免资源泄漏
 #endif
     }
-
     return _OK;
 }
 
