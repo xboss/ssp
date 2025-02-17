@@ -132,8 +132,9 @@ int main(int argc, char const* argv[]) {
     if (rt != _OK) {
         _LOG_E("start server error.");
     }
+    sstcp_stop_server(g_pipe->server);
     sspipe_free(g_pipe);
-    _LOG("Bye");
     sslog_free();
+    printf("Bye\n");
     return 0;
 }

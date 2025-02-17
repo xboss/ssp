@@ -30,6 +30,7 @@ static void *client_thread(void *arg) {
     // 关闭客户端套接字
     sstcp_close(client_socket);
     free(arg);  // 释放动态分配的内存
+    _LOG("client_thread exit.");
     return 0;
 }
 
