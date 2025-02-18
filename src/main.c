@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <signal.h>
+
 #include "ss.h"
 #include "ssconf.h"
 #include "sspipe.h"
@@ -127,6 +129,9 @@ int main(int argc, char const* argv[]) {
         _LOG_E("init pipe error.");
         return 1;
     }
+
+    // 忽略SIGPIPE信号
+    signal(SIGPIPE, SIG_IGN);
 
     rt = sstcp_start_server(g_pipe->server);
     if (rt != _OK) {

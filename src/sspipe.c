@@ -12,41 +12,7 @@
 /* ---------- protocol ----------- */
 #define PACKET_HEAD_LEN 4
 #define MAX_PAYLOAD_LEN (1024 * 1)
-
-// static int pack(int payload_len, const char* payload, char** buf) {
-//     if (payload_len <= 0 || !payload) {
-//         return 0;
-//     }
-//     _ALLOC(*buf, char*, payload_len + PACKET_HEAD_LEN);
-//     memset(*buf, 0, payload_len + PACKET_HEAD_LEN);
-//     int n_payload_len = htonl(payload_len);
-//     memcpy(*buf, &n_payload_len, PACKET_HEAD_LEN);
-//     memcpy(*buf + PACKET_HEAD_LEN, payload, payload_len);
-//     return payload_len + PACKET_HEAD_LEN;
-// }
-
-// static int unpack(char** p, int len, int* payload_len) {
-//     _LOG("uppack len:%d", len);
-//     assert(p);
-//     assert(*p);
-//     assert(len > 0);
-//     if (len < PACKET_HEAD_LEN) {
-//         return _ERR;
-//     }
-//     *payload_len = ntohl(*(uint32_t*)(*p));
-//     if (*payload_len <= 0 || *payload_len > 65535) {
-//         /* TODO: debug */
-//         _LOG_E("unpack payload_len:%d error, len:%d", *payload_len, len);
-//     }
-//     /* assert(*payload_len > 0 && *payload_len < 65535); */
-
-//     if (len < *payload_len + PACKET_HEAD_LEN) {
-//         return _ERR;
-//     }
-//     *p += PACKET_HEAD_LEN;
-//     _LOG("uppack len:%d payload_len:%d ok.", len, *payload_len);
-//     return _OK;
-// }
+#define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN) * 2
 
 /* --------------------- */
 
@@ -156,7 +122,7 @@ int unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd) {
 
         /* TODO: decrypt */
 
-        rt = sstcp_send(fd, ssb->buf + 4, payload_len);
+        rt = sstcp_send(fd, ssb->buf + PACKET_HEAD_LEN, payload_len);
         if (rt < 0) {
             perror("unpack_send to target failed");
             return -1;
@@ -196,7 +162,7 @@ int pack_send(int fd, const char* buf, int len) {
             _LOG_E("pack_send to target failed");
             return -1;
         }
-        rt = sstcp_send(fd, buf - (len - remaining), payload_len);
+        rt = sstcp_send(fd, buf + (len - remaining), payload_len);
         if (rt < 0) {
             _LOG_E("pack_send to target failed");
             return -1;
@@ -221,7 +187,7 @@ int pack_send(int fd, const char* buf, int len) {
  * @param src 0: front, 1: backend
  */
 static void recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_t* server, ssbuffer_t* ssb, int src) {
-    char buffer[PACKET_HEAD_LEN + MAX_PAYLOAD_LEN] = {0};
+    char buffer[RECV_BUF_SIZE] = {0};
     // 读取客户端数据
     int rlen = 0;
     int rt = 0;
@@ -234,8 +200,7 @@ static void recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server
         _LOG("Received: %d", rlen);
 
         int is_pack = 0;
-        if ((pipe->conf->mode == SSPIPE_MODE_LOCAL && src == 0) ||
-            (pipe->conf->mode == SSPIPE_MODE_REMOTE && src == 1)) {
+        if ((pipe->conf->mode == SSPIPE_MODE_LOCAL && src == 0) || (pipe->conf->mode == SSPIPE_MODE_REMOTE && src == 1)) {
             is_pack = 1;
         }
 
@@ -343,8 +308,7 @@ void handle_client(int front_fd, sstcp_server_t* server) {
 
     int rt = sstcp_connect(backend, pipe->conf->target_ip, pipe->conf->target_port);
     if (rt != _OK) {
-        _LOG_E("connect to target failed. %d %s:%d", backend->client_fd, pipe->conf->target_ip,
-               pipe->conf->target_port);
+        _LOG_E("connect to target failed. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
         perror("connect to target failed");
         sstcp_free_client(backend);
         return;
