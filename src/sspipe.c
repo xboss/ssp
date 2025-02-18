@@ -13,6 +13,8 @@
 #define PACKET_HEAD_LEN 4
 #define MAX_PAYLOAD_LEN (1024 * 1)
 #define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN) * 2
+#define RECV_TIMEOUT 1000 * 60
+#define SEND_TIMEOUT 1000 * 60
 
 /* --------------------- */
 
@@ -162,15 +164,16 @@ int pack_send(int fd, const char* buf, int len) {
             _LOG_E("pack_send to target failed");
             return -1;
         }
+        assert(rt == PACKET_HEAD_LEN);
         rt = sstcp_send(fd, buf + (len - remaining), payload_len);
         if (rt < 0) {
             _LOG_E("pack_send to target failed");
             return -1;
         }
-        _LOG("pack_send to target ok.");
-        assert(rt == payload_len);
+        _LOG("pack_send to target ok. rt:%d payload_len:%d", rt, payload_len);
+        // assert(rt == payload_len);
 
-        remaining = remaining - payload_len;
+        remaining = remaining - rt;
         assert(remaining >= 0);
     }
     return 0;
@@ -314,6 +317,12 @@ void handle_client(int front_fd, sstcp_server_t* server) {
         return;
     }
     _LOG("connect to target ok. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
+
+    /* TODO: read timeout from config */
+    sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
+    sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
+    sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
+    sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
 
     rt = run_backend(pipe, backend, front_fd);
     if (rt != _OK) {
