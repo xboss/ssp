@@ -46,7 +46,7 @@ struct ssnet_s {
     ssnet_writable_cb_t on_writable;
     ssnet_accept_cb_t on_accept;
     ssnet_tcp_server_t *tcp_server;
-    ssnet_udp_t *udp;
+    // ssnet_udp_t *udp;
     void *userdata;
 };
 
@@ -81,7 +81,7 @@ void ssnet_free(ssnet_t *net) {
         free(net->read_buf);
         net->read_buf = NULL;
     }
-    if (net->udp) ssnet_udp_free(net, net->udp->fd);
+    // if (net->udp) ssnet_udp_free(net, net->udp->fd);
     free(net);
     _LOG("free  ssnet ok.");
 }
@@ -337,82 +337,4 @@ int ssnet_tcp_connect(ssnet_t *net, const char *ip, unsigned short port) {
         net->on_writable(net, fd);
     }
     return fd;
-}
-
-/* -------- UDP -------- */
-
-/* static int is_target_addr_empty(ssnet_t *net) {
-    if (!net) return 1;
-    struct sockaddr_in tmp;
-    memset(&tmp, 0, sizeof(struct sockaddr_in));
-    if (memcmp(&tmp, &net->udp->target_addr, sizeof(struct sockaddr_in)) == 0) return 1;
-    return 0;
-} */
-
-static int udp_ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) {
-    _LOG("ssnet ssev_cb fd:%d e:%u", fd, event);
-    ssnet_t *net = (ssnet_t *)ssev_get_userdata(loop);
-    assert(net);
-    assert(net->udp);
-    assert(net->udp->fd == fd);
-    if (event == SSEV_EV_READ) {
-        /* struct sockaddr_in addr; */
-        int addr_len = sizeof(net->udp->addr);
-        int rlen = recvfrom(fd, net->read_buf, net->read_buf_size, 0, (struct sockaddr *)&net->udp->addr,
-                            (socklen_t *)&addr_len);
-        if (rlen <= 0) {
-            _LOG_E("udp recv error %s", strerror(errno));
-            return _ERR;
-        }
-        if (net->on_recv) net->on_recv(net, fd, net->read_buf, rlen, (struct sockaddr *)&net->udp->addr);
-    }
-    return _OK;
-}
-
-int ssnet_udp_init(ssnet_t *net, const char *ip, unsigned short port, int is_bind) {
-    if (!net || !ip || port <= 0) return _ERR;
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (-1 == fd) return _ERR;
-    struct sockaddr_in addr;
-    bzero(&addr, sizeof(struct sockaddr_in));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = inet_addr(ip);
-    addr.sin_port = htons(port);
-    if (is_bind) {
-        if (-1 == bind(fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in))) {
-            close(fd);
-            return _ERR;
-        }
-    }
-    if (ssev_watch(net->loop, SSEV_EV_READ, fd, udp_ssev_cb) != 0) {
-        _LOG_E("watch event error. fd:%d", fd);
-        close(fd);
-        return _ERR;
-    }
-    ssnet_udp_t *_ALLOC(udp, ssnet_udp_t *, sizeof(ssnet_udp_t));
-    memset(udp, 0, sizeof(ssnet_udp_t));
-    udp->fd = fd;
-    net->udp = udp;
-    return fd;
-}
-
-void ssnet_udp_free(ssnet_t *net, int fd) {
-    if (!net || fd <= 0 || !net->udp) return;
-    assert(net->udp->fd == fd);
-    int rt = ssev_unwatch(net->loop, SSEV_EV_ALL, fd);
-    assert(rt == 0);
-    close(fd);
-    free(net->udp);
-    net->udp = NULL;
-    _LOG("ssnet_udp_free and close fd:%d", fd);
-}
-
-int ssnet_udp_send(ssnet_t *net, int fd, const char *buf, int len, const struct sockaddr *addr) {
-    if (!net || fd <= 0 || !buf || len <= 0) return _ERR;
-    int wlen = sendto(net->udp->fd, buf, len, 0, addr, sizeof(*addr));
-    if (wlen <= 0) {
-        _LOG_E("udp send error %s", strerror(errno));
-        return _ERR;
-    }
-    return wlen;
 }

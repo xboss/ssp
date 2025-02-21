@@ -2,9 +2,9 @@
 #define _POSIX_C_SOURCE 199506L
 #endif
 
+#include <arpa/inet.h>
 #include <assert.h>
 #include <ctype.h>
-#include <arpa/inet.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -30,26 +30,13 @@
     }
 #endif
 
-struct config_s {
-    char listen_ip[INET_ADDRSTRLEN + 1];
-    unsigned short listen_port;
-    char target_ip[INET_ADDRSTRLEN + 1];
-    unsigned short target_port;
-    char key[CIPHER_KEY_LEN + 1];
-    int mode;
-    int timeout;
-    int read_buf_size;
-    char* log_file;
-    int log_level;
-};
-typedef struct config_s config_t;
-
 static config_t g_conf;
 static sspipe_t* g_pipe;
 static ssev_loop_t* g_loop;
 
 static int load_conf(const char* conf_file, config_t* conf) {
-    char* keys[] = {"mode", "listen_ip", "listen_port", "target_ip", "target_port", "password", "timeout", "read_buf_size", "log_file", "log_level"};
+    char* keys[] = {"mode",     "listen_ip", "listen_port",   "target_ip", "target_port",
+                    "password", "timeout",   "read_buf_size", "log_file",  "log_level"};
     int keys_cnt = sizeof(keys) / sizeof(char*);
     ssconf_t* cf = ssconf_init(keys, keys_cnt);
     assert(cf);
@@ -201,7 +188,8 @@ int main(int argc, char const* argv[]) {
     }
     ssev_set_ev_timeout(g_loop, g_conf.timeout);
 
-    g_pipe = sspipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, g_conf.key, on_pipe_accept);
+    g_pipe =
+        sspipe_init(g_loop, g_conf.read_buf_size, g_conf.listen_ip, g_conf.listen_port, g_conf.key, on_pipe_accept);
     if (!g_pipe) {
         _LOG_E("init pipe error.");
         ssev_free(g_loop);

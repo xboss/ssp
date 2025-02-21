@@ -31,9 +31,4 @@ int ssnet_tcp_init_server(ssnet_t *net, const char *bind_ip, unsigned short port
 void ssnet_tcp_stop_server(ssnet_t *net, int listen_fd);
 int ssnet_tcp_connect(ssnet_t *net, const char *ip, unsigned short port);
 
-/* -------- UDP -------- */
-int ssnet_udp_init(ssnet_t *net, const char *ip, unsigned short port, int is_bind);
-void ssnet_udp_free(ssnet_t *net, int fd);
-int ssnet_udp_send(ssnet_t *net, int fd, const char *buf, int len, const struct sockaddr *addr);
-
 #endif /* _SSNET_H */
