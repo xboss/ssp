@@ -7,6 +7,7 @@
 #include "ssconf.h"
 #include "sspipe.h"
 #include "sslocal.h"
+#include "ssremote.h"
 
 #define SSPIPE_MODE_LOCAL 0
 #define SSPIPE_MODE_REMOTE 1
@@ -154,7 +155,19 @@ int main(int argc, char const* argv[]) {
         ssev_run(g_loop);
         sslocal_free(sslocal);
     } else if (g_conf.mode == SSPIPE_MODE_REMOTE) {
-        /* TODO: */
+        ssremote_t* ssremote = ssremote_init(g_loop, &g_conf);
+        if (!ssremote) {
+            _LOG_E("init ssremote error.");
+            ssev_free(g_loop);
+            return 1;
+        }
+        struct sigaction action;
+        memset(&action, 0, sizeof(struct sigaction));
+        action.sa_handler = signal_handler;
+        sigaction(SIGPIPE, &action, NULL);
+        sigaction(SIGINT, &action, NULL);
+        ssev_run(g_loop);
+        ssremote_free(ssremote);
     }
     ssev_free(g_loop);
     _LOG("Bye");
