@@ -7,7 +7,7 @@ typedef struct {
     ssev_loop_t *loop;
     ssconfig_t *config;
     ssnet_t *net;
-    int server_fd;
+    int listen_fd;
 } sslocal_t;
 
 sslocal_t *sslocal_init(ssev_loop_t *loop, ssconfig_t *config);

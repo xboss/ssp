@@ -7,7 +7,7 @@
 
 typedef struct ssnet_s ssnet_t;
 
-typedef int (*ssnet_recv_cb_t)(ssnet_t *net, int fd, const char *buf, int len, struct sockaddr *addr);
+typedef int (*ssnet_recv_cb_t)(ssnet_t *net, int fd, const char *buf, int len);
 typedef int (*ssnet_close_cb_t)(ssnet_t *net, int fd);
 typedef int (*ssnet_accept_cb_t)(ssnet_t *net, int fd);
 typedef int (*ssnet_writable_cb_t)(ssnet_t *net, int fd);
@@ -23,7 +23,7 @@ int ssnet_set_writable_cb(ssnet_t *net, ssnet_writable_cb_t on_writable);
 
 /* -------- TCP -------- */
 /**
- * @return >0:ok; 0:colsed; -1:pending; -2:error
+ * @return >0:ok; 0:pending; -1:colsed; -2:error
  */
 int ssnet_tcp_send(ssnet_t *net, int fd, const char *buf, int len);
 void ssnet_tcp_close(ssnet_t *net, int fd);

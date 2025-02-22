@@ -13,18 +13,11 @@
 #define _OK 0
 #define _ERR -1
 
-// #ifndef _ALLOC
-// #define _ALLOC(_p, _type, _size)   \
-//     (_p) = (_type)malloc((_size)); \
-//     if (!(_p)) {                   \
-//         perror("alloc error");     \
-//         exit(1);                   \
-//     }
-// #endif  // _ALLOC
-
 #if !defined(INET_ADDRSTRLEN)
 #define INET_ADDRSTRLEN 16
 #endif  // INET_ADDRSTRLEN
+
+#define PACKET_HEAD_LEN 4
 
 typedef struct {
     char* buf;  // 动态缓冲区
@@ -64,11 +57,9 @@ typedef struct {
 
 ssconn_t* ssconn_init(int fd, int cp_fd, ssconn_type_t type, ssconn_st_t status, ssnet_t* net);
 void ssconn_free(ssconn_t* conn);
+void ssconn_free_all();
 ssconn_t* ssconn_get(int fd);
-// int ssconn_chg_status(ssconn_t* conn, ssconn_st_t status);
 int ssconn_close(int fd);
-// int ssconn_add_cp(ssconn_t* conn, int cp_fd);
-// int ssconn_send(ssconn_t* conn, const char* buf, int len);
-// int ssconn_recv(ssconn_t* conn, char* buf, int len);
+int ssconn_close_all();
 
 #endif /* _SSPIPE_H */

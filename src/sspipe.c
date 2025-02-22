@@ -38,8 +38,14 @@ int ssbuffer_grow(ssbuffer_t* ssb, int len) {
     return _OK;
 }
 
-// connection
-int ssconn_close(int fd) {
+// connection start
+
+#define MAX_CLOSE_FD_ARR_SIZE 1024
+static int g_close_fd_arr[MAX_CLOSE_FD_ARR_SIZE] = {0};
+static int g_close_fd_arr_len = 0;
+static ssconn_t* g_conn_tb = NULL;
+
+static int real_close(int fd) {
     ssconn_t* conn = ssconn_get(fd);
     if (!conn) {
         _LOG("ssconn_get conn error");
@@ -49,15 +55,92 @@ int ssconn_close(int fd) {
     assert(net);
     conn->status = PCONN_ST_OFF;
     ssnet_tcp_close(net, fd);
+    return _OK;
+}
+
+ssconn_t* ssconn_init(int fd, int cp_fd, ssconn_type_t type, ssconn_st_t status, ssnet_t* net){
+    ssconn_t* conn = (ssconn_t*)calloc(1, sizeof(ssconn_t));
+    if (!conn) {
+        return NULL;
+    }
+    conn->fd = fd;
+    conn->cp_fd = cp_fd;
+    conn->type = type;
+    conn->status = status;
+    conn->net = net;
+    conn->recv_buf = ssbuffer_init();
+    conn->send_buf = ssbuffer_init();
+    HASH_ADD_INT(g_conn_tb, fd, conn);
+    return conn;
+}
+
+ssconn_t* ssconn_get(int fd) {
+    ssconn_t* conn = NULL;
+    HASH_FIND_INT(g_conn_tb, &fd, conn);
+    return conn;
+}
+
+void ssconn_free(ssconn_t* conn) {
+    if (conn) {
+        real_close(conn->fd);
+        real_close(conn->cp_fd);
+        if (conn->recv_buf) {
+            ssbuffer_free(conn->recv_buf);
+            conn->recv_buf = NULL;
+        }
+        if (conn->send_buf) {
+            ssbuffer_free(conn->send_buf);
+            conn->send_buf = NULL;
+        }
+        if (g_conn_tb) {
+            HASH_DEL(g_conn_tb, conn);
+        }
+        free(conn);
+    }
+}
+
+void ssconn_free_all() {
+    if (!g_conn_tb) {
+        return;
+    }
+    ssconn_t *conn, *tmp;
+    HASH_ITER(hh, g_conn_tb, conn, tmp) {
+        ssconn_free(conn);
+    }
+    g_conn_tb = NULL;
+}
+
+int ssconn_close(int fd) {
+    ssconn_t* conn = ssconn_get(fd);
+    if (!conn) {
+        _LOG("ssconn_get conn error");
+        return _ERR;
+    }
+    conn->status = PCONN_ST_OFF;
     int cp_fd = conn->cp_fd;
-    ssconn_free(conn);
     ssconn_t* cp_conn = ssconn_get(cp_fd);
     if (!cp_conn) {
         _LOG("ssconn_get cp_conn error");
         return _ERR;
     }
-    ssnet_tcp_close(net, cp_fd);
     cp_conn->status = PCONN_ST_OFF;
-    ssconn_free(cp_conn);
+
+    if (g_close_fd_arr_len >= MAX_CLOSE_FD_ARR_SIZE) {
+        _LOG_E("close fd arr is full");
+        real_close(g_close_fd_arr[0]);
+        g_close_fd_arr[0] = fd;
+        return _OK;
+    }
+    g_close_fd_arr[g_close_fd_arr_len++] = fd;
     return _OK;
 }
+
+int ssconn_close_all() {
+    for (int i = 0; i < g_close_fd_arr_len; i++) {
+        real_close(g_close_fd_arr[i]);
+    }
+    g_close_fd_arr_len = 0;
+    return _OK;
+}
+
+// connection end

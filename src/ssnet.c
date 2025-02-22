@@ -167,6 +167,7 @@ static int tcp_ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) 
             memset(net->read_buf, 0, net->read_buf_size); /* TODO: debug */
             ret = read(fd, net->read_buf, net->read_buf_size);
             if (ret == 0) {
+                perror("read error");
                 _LOG_W("tcp_ssev_cb close fd:%d", fd);
                 net->on_close(net, fd);
                 /* close(fd); */
@@ -182,7 +183,7 @@ static int tcp_ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) 
                 break;
             } else {
                 _LOG_W("once read fd:%d ret:%d", fd, ret);
-                net->on_recv(net, fd, net->read_buf, ret, NULL);
+                net->on_recv(net, fd, net->read_buf, ret);
             }
         } while (ret >= net->read_buf_size);
         return _OK;
@@ -195,17 +196,20 @@ static int tcp_ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) 
     return _OK;
 }
 
+/**
+ * @return >0:ok; 0:pending; -1:colsed; -2:error
+ */
 int ssnet_tcp_send(ssnet_t *net, int fd, const char *buf, int len) {
     if (!net || fd <= 0 || !buf || len <= 0) return -2;
     int rt, bytes;
     bytes = write(fd, buf, len);
     if (bytes == 0) {
         /* tcp close */
-        rt = 0;
+        rt = -1;
         _LOG_W("net_tcp_send close fd:%d len:%d", fd, len);
     } else if ((bytes == -1) && ((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
         /* pending */
-        rt = -1;
+        rt = 0;
         _LOG_W("net_tcp_send again fd:%d len:%d", fd, len);
     } else if ((bytes == -1) && !((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
         /* error */

@@ -15,9 +15,9 @@ include_directories(${PROJECT_SOURCE_DIR}/src/)
 aux_source_directory(${PROJECT_SOURCE_DIR}/src DIR_SRCS)
 
 ############# ssp #############
-# add_executable(ssp ${DIR_SRCS})
-# target_link_libraries(ssp ssl)
-# target_link_libraries(ssp crypto)
+add_executable(ssp ${DIR_SRCS})
+target_link_libraries(ssp ssl)
+target_link_libraries(ssp crypto)
 
 
 ############# static #############
@@ -26,11 +26,11 @@ aux_source_directory(${PROJECT_SOURCE_DIR}/src DIR_SRCS)
 # target_link_libraries(ssp_static crypto -static)
 
 ############# test #############
-list(REMOVE_ITEM DIR_SRCS "${PROJECT_SOURCE_DIR}/src/main.c")
-message("DIR_SRCS: ${DIR_SRCS}")
-add_executable(test ${DIR_SRCS})
-target_link_libraries(test pthread)
-target_link_libraries(test ssl)
-target_link_libraries(test crypto)
+# list(REMOVE_ITEM DIR_SRCS "${PROJECT_SOURCE_DIR}/src/main.c")
+# message("DIR_SRCS: ${DIR_SRCS}")
+# add_executable(test ${DIR_SRCS})
+# target_link_libraries(test pthread)
+# target_link_libraries(test ssl)
+# target_link_libraries(test crypto)
 
 #cmake -DCMAKE_BUILD_TYPE=Debug ..
