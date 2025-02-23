@@ -2,7 +2,7 @@
 
 //  ---------- callback start -----------
 
-#define _GET_SSREMOTE_FROM_NET                                 \
+#define _GET_SSREMOTE_FROM_NET                                   \
     ssremote_t* ssremote = (ssremote_t*)ssnet_get_userdata(net); \
     assert(ssremote)
 
@@ -20,73 +20,54 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
         ssconn_close(conn->cp_fd);
         return _ERR;
     }
+
     assert(conn->recv_buf);
     assert(conn->send_buf);
-    int rt = ssbuffer_grow(conn->recv_buf, len);
-    if (rt != _OK) {
-        _LOG_E("ssbuffer_grow error");
+
+    ssconn_t* cp_conn = ssconn_get(conn->cp_fd);
+    if (!cp_conn) {
+        _LOG_E("ssconn_get cp_conn error");
+        ssconn_close(conn->fd);
         return _ERR;
     }
-    memcpy(conn->recv_buf->buf + conn->recv_buf->len, buf, len);
-    conn->recv_buf->len += len;
 
-    if (conn->status != PCONN_ST_ON) {
+    if (conn->status != PCONN_ST_ON || cp_conn->status != PCONN_ST_ON) {
         _LOG_E("conn status error");
         return _ERR;
     }
 
+    int rt = 0;
     if (conn->type == SSCONN_TYPE_CLI) {
-        if (conn->recv_buf->len <= 0) {
-            return _OK;
-        }
         // encrypt
         int ciphertext_len = 0;
-        char* cipher_text = aes_encrypt(ssremote->config->key, conn->recv_buf->buf, conn->recv_buf->len, &ciphertext_len);
+        char* cipher_text = aes_encrypt(ssremote->config->key, buf, len, &ciphertext_len);
         if (cipher_text == NULL) {
             _LOG_E("aes_encrypt error");
             ssconn_close(conn->fd);
             return _ERR;
         }
-        // pack
-        char* packet = (char*)calloc(1, PACKET_HEAD_LEN + ciphertext_len);
-        if (packet == NULL) {
-            _LOG_E("calloc error");
-            free(cipher_text);
-            ssconn_close(conn->fd);
+
+        // pack and send to buffer
+        rt = ssbuffer_grow(cp_conn->send_buf, ciphertext_len + PACKET_HEAD_LEN);
+        if (rt != _OK) {
+            _LOG_E("ssbuffer_grow send_buf error");
             return _ERR;
         }
         int ciphertext_len_net = htonl(ciphertext_len);
-        memcpy(packet, &ciphertext_len_net, PACKET_HEAD_LEN);
-        memcpy(packet + PACKET_HEAD_LEN, cipher_text, ciphertext_len);
-        // send
-        rt = ssnet_tcp_send(net, conn->cp_fd, packet, PACKET_HEAD_LEN + ciphertext_len);
-        assert(rt <= PACKET_HEAD_LEN + ciphertext_len);
-        if (rt < 0) {
-            // error or closed
-            _LOG_E("ssnet_tcp_send error");
-            free(cipher_text);
-            free(packet);
-            ssconn_close(conn->fd);
-            return _ERR;
-        }
-        if (rt == 0) {
-            _LOG_E("ssnet_tcp_send pending");
-            free(cipher_text);
-            free(packet);
-            return _ERR;
-        }
-        if (rt != PACKET_HEAD_LEN + ciphertext_len) {
-            _LOG_E("ssnet_tcp_send error");
-            free(cipher_text);
-            free(packet);
-            memmove(conn->recv_buf->buf, conn->recv_buf->buf + rt, conn->recv_buf->len - rt);
-            conn->recv_buf->len -= rt;
-            return _ERR;
-        }
-        conn->recv_buf->len = 0;
-        free(packet);
+        memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, &ciphertext_len_net, PACKET_HEAD_LEN);
+        cp_conn->send_buf->len += PACKET_HEAD_LEN;
+        memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, cipher_text, ciphertext_len);
+        cp_conn->send_buf->len += ciphertext_len;
         free(cipher_text);
     } else if (conn->type == SSCONN_TYPE_SERV) {
+        rt = ssbuffer_grow(conn->recv_buf, len);
+        if (rt != _OK) {
+            _LOG_E("ssbuffer_grow recv_buf error");
+            return _ERR;
+        }
+        memcpy(conn->recv_buf->buf + conn->recv_buf->len, buf, len);
+        conn->recv_buf->len += len;
+
         int ciphertext_len = 0;
         int plain_text_len = 0;
         char* plain_text = NULL;
@@ -99,8 +80,8 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
                 return _ERR;
             }
             if (ciphertext_len > conn->recv_buf->len - PACKET_HEAD_LEN) {
-                _LOG_E("ciphertext_len:%d > recv_buf->len:%d", ciphertext_len, conn->recv_buf->len);
-                return _ERR;
+                _LOG("ciphertext_len:%d > recv_buf->len:%d", ciphertext_len, conn->recv_buf->len);
+                return _OK;
             }
             // decrypt
             plain_text = aes_decrypt(ssremote->config->key, conn->recv_buf->buf + PACKET_HEAD_LEN, ciphertext_len, &plain_text_len);
@@ -109,21 +90,15 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
                 ssconn_close(conn->fd);
                 return _ERR;
             }
-            // send
-            rt = ssnet_tcp_send(net, conn->cp_fd, plain_text, plain_text_len);
-            assert(rt <= plain_text_len);
-            if (rt < 0) {
-                // error or closed
-                _LOG_E("ssnet_tcp_send error");
-                free(plain_text);
-                ssconn_close(conn->fd);
+
+            // send to buffer
+            rt = ssbuffer_grow(cp_conn->send_buf, plain_text_len);
+            if (rt != _OK) {
+                _LOG_E("ssbuffer_grow send_buf error");
                 return _ERR;
             }
-            if (rt == 0) {
-                _LOG_E("ssnet_tcp_send pending");
-                free(plain_text);
-                return _ERR;
-            }
+            memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, plain_text, plain_text_len);
+            cp_conn->send_buf->len += plain_text_len;
             free(plain_text);
             memmove(conn->recv_buf->buf, conn->recv_buf->buf + PACKET_HEAD_LEN + ciphertext_len, conn->recv_buf->len - PACKET_HEAD_LEN - ciphertext_len);
             conn->recv_buf->len -= PACKET_HEAD_LEN + ciphertext_len;
@@ -132,6 +107,28 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
     } else {
         _LOG_E("conn type error");
         return _ERR;
+    }
+    if (cp_conn->send_buf->len > 0) {
+        rt = ssnet_tcp_send(net, cp_conn->fd, cp_conn->send_buf->buf, cp_conn->send_buf->len);
+        assert(rt <= cp_conn->send_buf->len);
+        if (rt < 0) {
+            // error or closed
+            _LOG_E("ssnet_tcp_send error or closed fd:%d", conn->cp_fd);
+            ssconn_close(conn->fd);
+            return _ERR;
+        }
+        if (rt == 0) {
+            _LOG_E("ssnet_tcp_send pending fd:%d", conn->cp_fd);
+            return _OK;
+        }
+        if (rt != cp_conn->send_buf->len) {
+            _LOG_E("ssnet_tcp_send remain. fd:%d", conn->cp_fd);
+            memmove(cp_conn->send_buf->buf, cp_conn->send_buf->buf + rt, cp_conn->send_buf->len - rt);
+            cp_conn->send_buf->len -= rt;
+            assert(cp_conn->send_buf->len >= 0);
+            return _OK;
+        }
+        cp_conn->send_buf->len = 0;
     }
     return _OK;
 }
@@ -193,7 +190,7 @@ static int on_back_connected(ssremote_t* ssremote, ssconn_t* back_conn) {
     front_conn->status = PCONN_ST_ON;
     back_conn->status = PCONN_ST_ON;
     if (front_conn->recv_buf->len > 0) {
-        on_recv(ssremote->net, front_conn->fd, NULL, 0);
+        on_recv(ssremote->net, front_conn->fd, NULL, 0); /* TODO: */
     }
 
     return _OK;
@@ -259,5 +256,6 @@ void ssremote_free(ssremote_t* ssremote) {
         }
         free(ssremote);
     }
+    ssconn_free_all();
     return;
 }

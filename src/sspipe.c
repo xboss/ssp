@@ -1,5 +1,7 @@
 #include "sspipe.h"
 
+// ssbuffer start
+
 ssbuffer_t* ssbuffer_init() {
     ssbuffer_t* ssb = (ssbuffer_t*)calloc(1, sizeof(ssbuffer_t));
     if (!ssb) {
@@ -19,6 +21,7 @@ void ssbuffer_free(ssbuffer_t* ssb) {
 }
 
 int ssbuffer_grow(ssbuffer_t* ssb, int len) {
+    assert(len >= 0);
     if (ssb->len + len > ssb->cap) {
         int new_cap = ssb->cap * 3 / 2;
         if (new_cap < ssb->len + len) {
@@ -37,6 +40,8 @@ int ssbuffer_grow(ssbuffer_t* ssb, int len) {
     }
     return _OK;
 }
+
+// ssbuffer end
 
 // connection start
 

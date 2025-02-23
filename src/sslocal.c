@@ -21,6 +21,12 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
         return _ERR;
     }
     assert(conn->recv_buf);
+    _LOG("sspipe on_recv fd:%d recv_buf len:%d cap:%d", fd, conn->recv_buf->len, conn->recv_buf->cap);
+    if (conn->recv_buf->len > 1024 * 100) {
+        _LOG_E("receiving buffer exceeds threshold error");
+        ssconn_close(conn->fd);
+        return _ERR;
+    }
     assert(conn->send_buf);
     int rt = ssbuffer_grow(conn->recv_buf, len);
     if (rt != _OK) {
@@ -265,5 +271,6 @@ void sslocal_free(sslocal_t* sslocal) {
         }
         free(sslocal);
     }
+    ssconn_free_all();
     return;
 }
