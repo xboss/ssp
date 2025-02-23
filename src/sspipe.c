@@ -63,7 +63,7 @@ static int real_close(int fd) {
     return _OK;
 }
 
-ssconn_t* ssconn_init(int fd, int cp_fd, ssconn_type_t type, ssconn_st_t status, ssnet_t* net){
+ssconn_t* ssconn_init(int fd, int cp_fd, ssconn_type_t type, ssconn_st_t status, ssnet_t* net) {
     ssconn_t* conn = (ssconn_t*)calloc(1, sizeof(ssconn_t));
     if (!conn) {
         return NULL;
@@ -148,4 +148,279 @@ int ssconn_close_all() {
     return _OK;
 }
 
+int ssconn_flush_send_buf(ssconn_t* cp_conn) {
+    if (cp_conn->send_buf->len > 0) {
+        int rt = ssnet_tcp_send(cp_conn->net, cp_conn->fd, cp_conn->send_buf->buf, cp_conn->send_buf->len);
+        assert(rt <= cp_conn->send_buf->len);
+        if (rt < 0) {
+            // error or closed
+            _LOG_E("ssnet_tcp_send error or closed fd:%d", cp_conn->fd);
+            ssconn_close(cp_conn->fd);
+            return _ERR;
+        }
+        if (rt == 0) {
+            _LOG_E("ssnet_tcp_send pending fd:%d", cp_conn->cp_fd);
+            return _OK;
+        }
+        if (rt != cp_conn->send_buf->len) {
+            _LOG_E("ssnet_tcp_send remain. fd:%d", cp_conn->cp_fd);
+            memmove(cp_conn->send_buf->buf, cp_conn->send_buf->buf + rt, cp_conn->send_buf->len - rt);
+            cp_conn->send_buf->len -= rt;
+            assert(cp_conn->send_buf->len >= 0);
+            return _OK;
+        }
+        cp_conn->send_buf->len = 0;
+    }
+    return _OK;
+}
+
 // connection end
+
+//  ---------- sspipe start -----------
+
+// callback start
+
+#define _GET_SSPIPE_FROM_NET                               \
+    sspipe_t* sspipe = (sspipe_t*)ssnet_get_userdata(net); \
+    assert(sspipe)
+
+static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
+    _LOG("sspipe on_recv fd:%d len:%d", fd, len);
+    _GET_SSPIPE_FROM_NET;
+    ssconn_t* conn = ssconn_get(fd);
+    if (!conn) {
+        _LOG_E("ssconn_get conn error");
+        return _ERR;
+    }
+    assert(conn->cp_fd > 0);
+    if (conn->status == PCONN_ST_OFF) {
+        _LOG_E("conn is closed");
+        ssconn_close(conn->cp_fd);
+        return _ERR;
+    }
+
+    assert(conn->recv_buf);
+    assert(conn->send_buf);
+
+    ssconn_t* cp_conn = ssconn_get(conn->cp_fd);
+    if (!cp_conn) {
+        _LOG_E("ssconn_get cp_conn error");
+        ssconn_close(conn->fd);
+        return _ERR;
+    }
+
+    int rt = ssbuffer_grow(conn->recv_buf, len);
+    if (rt != _OK) {
+        _LOG_E("ssbuffer_grow recv_buf error");
+        return _ERR;
+    }
+    memcpy(conn->recv_buf->buf + conn->recv_buf->len, buf, len);
+    conn->recv_buf->len += len;
+
+    if (conn->status != PCONN_ST_ON || cp_conn->status != PCONN_ST_ON) {
+        _LOG_E("conn status error");
+        return _ERR;
+    }
+
+    int is_pack = (sspipe->config->mode == SSPIPE_MODE_LOCAL && conn->type == SSCONN_TYPE_SERV) || (sspipe->config->mode == SSPIPE_MODE_REMOTE && conn->type == SSCONN_TYPE_CLI);
+
+    if (is_pack) {
+        // encrypt
+        int ciphertext_len = 0;
+        char* cipher_text = aes_encrypt(sspipe->config->key, conn->recv_buf->buf, conn->recv_buf->len, &ciphertext_len);
+        if (cipher_text == NULL) {
+            _LOG_E("aes_encrypt error");
+            ssconn_close(conn->fd);
+            return _ERR;
+        }
+
+        // pack and send to buffer
+        rt = ssbuffer_grow(cp_conn->send_buf, ciphertext_len + PACKET_HEAD_LEN);
+        if (rt != _OK) {
+            _LOG_E("ssbuffer_grow send_buf error");
+            ssconn_close(conn->fd);
+            return _ERR;
+        }
+        int ciphertext_len_net = htonl(ciphertext_len);
+        memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, &ciphertext_len_net, PACKET_HEAD_LEN);
+        cp_conn->send_buf->len += PACKET_HEAD_LEN;
+        memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, cipher_text, ciphertext_len);
+        cp_conn->send_buf->len += ciphertext_len;
+        free(cipher_text);
+
+        conn->recv_buf->len = 0;
+
+        ssconn_flush_send_buf(cp_conn);
+    } else {
+        int ciphertext_len = 0;
+        int plain_text_len = 0;
+        char* plain_text = NULL;
+        while (conn->recv_buf->len > PACKET_HEAD_LEN) {
+            // unpack
+            ciphertext_len = ntohl(*(int*)conn->recv_buf->buf);
+            if (ciphertext_len <= 0 || ciphertext_len > 65535) { /* TODO: magic number */
+                _LOG_E("ciphertext_len:%d error. recv_buf->len:%d", ciphertext_len, conn->recv_buf->len);
+                ssconn_close(conn->fd);
+                return _ERR;
+            }
+            if (ciphertext_len > conn->recv_buf->len - PACKET_HEAD_LEN) {
+                _LOG("ciphertext_len:%d > recv_buf->len:%d", ciphertext_len, conn->recv_buf->len);
+                return _OK;
+            }
+            // decrypt
+            plain_text = aes_decrypt(sspipe->config->key, conn->recv_buf->buf + PACKET_HEAD_LEN, ciphertext_len, &plain_text_len);
+            if (plain_text == NULL) {
+                _LOG_E("aes_decrypt error");
+                ssconn_close(conn->fd);
+                return _ERR;
+            }
+
+            // send to buffer
+            rt = ssbuffer_grow(cp_conn->send_buf, plain_text_len);
+            if (rt != _OK) {
+                _LOG_E("ssbuffer_grow send_buf error");
+                ssconn_close(conn->fd);
+                return _ERR;
+            }
+            memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, plain_text, plain_text_len);
+            cp_conn->send_buf->len += plain_text_len;
+            free(plain_text);
+
+            memmove(conn->recv_buf->buf, conn->recv_buf->buf + PACKET_HEAD_LEN + ciphertext_len, conn->recv_buf->len - PACKET_HEAD_LEN - ciphertext_len);
+            conn->recv_buf->len -= PACKET_HEAD_LEN + ciphertext_len;
+            assert(conn->recv_buf->len >= 0);
+
+            ssconn_flush_send_buf(cp_conn);
+        }
+    }
+    return _OK;
+}
+
+static int on_close(ssnet_t* net, int fd) {
+    _LOG("on close fd:%d", fd);
+    int rt = ssconn_close(fd);
+    return rt;
+}
+
+static int on_accept(ssnet_t* net, int serv_fd) {
+    _LOG("on_accept serv_fd:%d", serv_fd);
+    _GET_SSPIPE_FROM_NET;
+
+    int back_fd = -1;
+    ssconn_t* front_conn = NULL;
+    ssconn_t* back_conn = NULL;
+    back_fd = ssnet_tcp_connect(sspipe->net, sspipe->config->target_ip, sspipe->config->target_port);
+    _LOG("connect back_fd:%d serv_fd:%d", back_fd, serv_fd);
+    if (back_fd <= 0) {
+        _LOG_E("connect back_fd:%d serv_fd:%d error", back_fd, serv_fd);
+        goto _on_accept_error;
+    }
+    front_conn = ssconn_init(serv_fd, back_fd, SSCONN_TYPE_SERV, PCONN_ST_WAIT, sspipe->net);
+    if (!front_conn) {
+        _LOG_E("ssconn_init front_conn error");
+        goto _on_accept_error;
+    }
+    back_conn = ssconn_init(back_fd, serv_fd, SSCONN_TYPE_CLI, PCONN_ST_WAIT, sspipe->net);
+    if (!back_conn) {
+        _LOG_E("ssconn_init back_conn error");
+        goto _on_accept_error;
+    }
+    return _OK;
+
+_on_accept_error:
+    if (back_fd > 0) {
+        ssnet_tcp_close(sspipe->net, back_fd);
+    }
+    if (front_conn) {
+        ssconn_free(front_conn);
+    }
+    if (back_conn) {
+        ssconn_free(back_conn);
+    }
+    return _ERR;
+}
+
+static int on_back_connected(sspipe_t* sspipe, ssconn_t* back_conn) {
+    assert(back_conn);
+    assert(back_conn->cp_fd > 0);
+    _LOG("on_connected fd:%d", back_conn->fd);
+    ssconn_t* front_conn = ssconn_get(back_conn->cp_fd);
+    if (!front_conn || front_conn->status == PCONN_ST_OFF) {
+        _LOG_E("ssconn_get front_conn error");
+        ssconn_close(back_conn->fd);
+        return _ERR;
+    }
+    front_conn->status = PCONN_ST_ON;
+    back_conn->status = PCONN_ST_ON;
+    if (front_conn->recv_buf->len > 0) {
+        on_recv(sspipe->net, front_conn->fd, NULL, 0);
+    }
+
+    return _OK;
+}
+
+static int on_back_writable(ssnet_t* net, int fd) {
+    _LOG("on_writable fd:%d", fd);
+    _GET_SSPIPE_FROM_NET;
+    ssconn_t* back_conn = ssconn_get(fd);
+    if (!back_conn) {
+        _LOG_E("ssconn_get back_conn error");
+        return _ERR;
+    }
+    if (back_conn->type != SSCONN_TYPE_CLI) {
+        return _OK;
+    }
+    int rt = on_back_connected(sspipe, back_conn);
+    return rt;
+}
+
+static int on_update(ssev_loop_t* loop, void* ud) {
+    // ssnet_t* net = (ssnet_t*)ud;
+    // assert(net);
+    // _GET_SSPIPE_FROM_NET;
+    ssconn_close_all();
+    return _OK;
+}
+
+// callback end
+
+sspipe_t* sspipe_init(ssev_loop_t* loop, ssconfig_t* config) {
+    sspipe_t* sspipe = calloc(1, sizeof(sspipe_t));
+    if (sspipe == NULL) {
+        return NULL;
+    }
+    sspipe->config = config;
+    sspipe->net = ssnet_init(loop, config->read_buf_size);
+    if (sspipe->net == NULL) {
+        free(sspipe);
+        return NULL;
+    }
+    ssnet_set_userdata(sspipe->net, sspipe);
+    ssnet_set_recv_cb(sspipe->net, on_recv);
+    ssnet_set_close_cb(sspipe->net, on_close);
+    ssnet_set_writable_cb(sspipe->net, on_back_writable);
+    ssev_set_update_cb(loop, on_update);
+
+    sspipe->listen_fd = ssnet_tcp_init_server(sspipe->net, config->listen_ip, config->listen_port, on_accept);
+    if (sspipe->listen_fd <= 0) {
+        sspipe_free(sspipe);
+        return NULL;
+    }
+    return sspipe;
+}
+
+void sspipe_free(sspipe_t* sspipe) {
+    if (sspipe) {
+        if (sspipe->listen_fd > 0) {
+            ssnet_tcp_stop_server(sspipe->net, sspipe->listen_fd);
+        }
+        if (sspipe->net) {
+            ssnet_free(sspipe->net);
+        }
+        free(sspipe);
+    }
+    ssconn_free_all();
+    return;
+}
+
+//  ---------- sspipe end -----------

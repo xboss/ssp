@@ -20,31 +20,31 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
         ssconn_close(conn->cp_fd);
         return _ERR;
     }
+
     assert(conn->recv_buf);
-    _LOG("sspipe on_recv fd:%d recv_buf len:%d cap:%d", fd, conn->recv_buf->len, conn->recv_buf->cap);
-    if (conn->recv_buf->len > 1024 * 100) {
-        _LOG_E("receiving buffer exceeds threshold error");
+    assert(conn->send_buf);
+
+    ssconn_t* cp_conn = ssconn_get(conn->cp_fd);
+    if (!cp_conn) {
+        _LOG_E("ssconn_get cp_conn error");
         ssconn_close(conn->fd);
         return _ERR;
     }
-    assert(conn->send_buf);
+
     int rt = ssbuffer_grow(conn->recv_buf, len);
     if (rt != _OK) {
-        _LOG_E("ssbuffer_grow error");
+        _LOG_E("ssbuffer_grow recv_buf error");
         return _ERR;
     }
     memcpy(conn->recv_buf->buf + conn->recv_buf->len, buf, len);
     conn->recv_buf->len += len;
 
-    if (conn->status != PCONN_ST_ON) {
+    if (conn->status != PCONN_ST_ON || cp_conn->status != PCONN_ST_ON) {
         _LOG_E("conn status error");
         return _ERR;
     }
 
     if (conn->type == SSCONN_TYPE_SERV) {
-        if (conn->recv_buf->len <= 0) {
-            return _OK;
-        }
         // encrypt
         int ciphertext_len = 0;
         char* cipher_text = aes_encrypt(sslocal->config->key, conn->recv_buf->buf, conn->recv_buf->len, &ciphertext_len);
@@ -54,50 +54,22 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
             return _ERR;
         }
 
-        // test
-        // int testlen = 0;
-        // char* plain_text = aes_decrypt(sslocal->config->key, cipher_text, ciphertext_len, &testlen); 
-        // free(plain_text);
-
-        // pack
-        char* packet = (char*)calloc(1, PACKET_HEAD_LEN + ciphertext_len);
-        if (packet == NULL) {
-            _LOG_E("calloc error");
-            free(cipher_text);
-            ssconn_close(conn->fd);
+        // pack and send to buffer
+        rt = ssbuffer_grow(cp_conn->send_buf, ciphertext_len + PACKET_HEAD_LEN);
+        if (rt != _OK) {
+            _LOG_E("ssbuffer_grow send_buf error");
             return _ERR;
         }
         int ciphertext_len_net = htonl(ciphertext_len);
-        memcpy(packet, &ciphertext_len_net, PACKET_HEAD_LEN);
-        memcpy(packet + PACKET_HEAD_LEN, cipher_text, ciphertext_len);
-        // send
-        rt = ssnet_tcp_send(net, conn->cp_fd, packet, PACKET_HEAD_LEN + ciphertext_len);
-        assert(rt <= PACKET_HEAD_LEN + ciphertext_len);
-        if (rt < 0) {
-            // error or closed
-            _LOG_E("ssnet_tcp_send error");
-            free(cipher_text);
-            free(packet);
-            ssconn_close(conn->fd);
-            return _ERR;
-        }
-        if (rt == 0) {
-            _LOG_E("ssnet_tcp_send pending");
-            free(cipher_text);
-            free(packet);
-            return _ERR;
-        }
-        if (rt != PACKET_HEAD_LEN + ciphertext_len) {
-            _LOG_E("ssnet_tcp_send error");
-            free(cipher_text);
-            free(packet);
-            memmove(conn->recv_buf->buf, conn->recv_buf->buf + rt, conn->recv_buf->len - rt);
-            conn->recv_buf->len -= rt;
-            return _ERR;
-        }
-        conn->recv_buf->len = 0;
-        free(packet);
+        memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, &ciphertext_len_net, PACKET_HEAD_LEN);
+        cp_conn->send_buf->len += PACKET_HEAD_LEN;
+        memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, cipher_text, ciphertext_len);
+        cp_conn->send_buf->len += ciphertext_len;
         free(cipher_text);
+
+        conn->recv_buf->len = 0;
+
+        ssconn_flush_send_buf(cp_conn);
     } else if (conn->type == SSCONN_TYPE_CLI) {
         int ciphertext_len = 0;
         int plain_text_len = 0;
@@ -111,8 +83,8 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
                 return _ERR;
             }
             if (ciphertext_len > conn->recv_buf->len - PACKET_HEAD_LEN) {
-                _LOG_E("ciphertext_len:%d > recv_buf->len:%d", ciphertext_len, conn->recv_buf->len);
-                return _ERR;
+                _LOG("ciphertext_len:%d > recv_buf->len:%d", ciphertext_len, conn->recv_buf->len);
+                return _OK;
             }
             // decrypt
             plain_text = aes_decrypt(sslocal->config->key, conn->recv_buf->buf + PACKET_HEAD_LEN, ciphertext_len, &plain_text_len);
@@ -121,25 +93,22 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
                 ssconn_close(conn->fd);
                 return _ERR;
             }
-            // send
-            rt = ssnet_tcp_send(net, conn->cp_fd, plain_text, plain_text_len);
-            assert(rt <= plain_text_len);
-            if (rt < 0) {
-                // error or closed
-                _LOG_E("ssnet_tcp_send error");
-                free(plain_text);
-                ssconn_close(conn->fd);
+
+            // send to buffer
+            rt = ssbuffer_grow(cp_conn->send_buf, plain_text_len);
+            if (rt != _OK) {
+                _LOG_E("ssbuffer_grow send_buf error");
                 return _ERR;
             }
-            if (rt == 0) {
-                _LOG_E("ssnet_tcp_send pending");
-                free(plain_text);
-                return _ERR;
-            }
+            memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, plain_text, plain_text_len);
+            cp_conn->send_buf->len += plain_text_len;
             free(plain_text);
+
             memmove(conn->recv_buf->buf, conn->recv_buf->buf + PACKET_HEAD_LEN + ciphertext_len, conn->recv_buf->len - PACKET_HEAD_LEN - ciphertext_len);
             conn->recv_buf->len -= PACKET_HEAD_LEN + ciphertext_len;
             assert(conn->recv_buf->len >= 0);
+
+            ssconn_flush_send_buf(cp_conn);
         }
     } else {
         _LOG_E("conn type error");

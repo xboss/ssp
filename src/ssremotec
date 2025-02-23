@@ -59,6 +59,8 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
         memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, cipher_text, ciphertext_len);
         cp_conn->send_buf->len += ciphertext_len;
         free(cipher_text);
+
+        ssconn_flush_send_buf(cp_conn);
     } else if (conn->type == SSCONN_TYPE_SERV) {
         rt = ssbuffer_grow(conn->recv_buf, len);
         if (rt != _OK) {
@@ -100,9 +102,12 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
             memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, plain_text, plain_text_len);
             cp_conn->send_buf->len += plain_text_len;
             free(plain_text);
+            
             memmove(conn->recv_buf->buf, conn->recv_buf->buf + PACKET_HEAD_LEN + ciphertext_len, conn->recv_buf->len - PACKET_HEAD_LEN - ciphertext_len);
             conn->recv_buf->len -= PACKET_HEAD_LEN + ciphertext_len;
             assert(conn->recv_buf->len >= 0);
+
+            ssconn_flush_send_buf(cp_conn);
         }
     } else {
         _LOG_E("conn type error");

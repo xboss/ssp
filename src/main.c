@@ -6,11 +6,6 @@
 
 #include "ssconf.h"
 #include "sspipe.h"
-#include "sslocal.h"
-#include "ssremote.h"
-
-#define SSPIPE_MODE_LOCAL 0
-#define SSPIPE_MODE_REMOTE 1
 
 static ssconfig_t g_conf;
 static ssev_loop_t* g_loop;
@@ -140,35 +135,50 @@ int main(int argc, char const* argv[]) {
         return 1;
     }
     ssev_set_ev_timeout(g_loop, g_conf.timeout);
-    if (g_conf.mode == SSPIPE_MODE_LOCAL) {
-        sslocal_t* sslocal = sslocal_init(g_loop, &g_conf);
-        if (!sslocal) {
-            _LOG_E("init sslocal error.");
-            ssev_free(g_loop);
-            return 1;
-        }
-        struct sigaction action;
-        memset(&action, 0, sizeof(struct sigaction));
-        action.sa_handler = signal_handler;
-        sigaction(SIGPIPE, &action, NULL);
-        sigaction(SIGINT, &action, NULL);
-        ssev_run(g_loop);
-        sslocal_free(sslocal);
-    } else if (g_conf.mode == SSPIPE_MODE_REMOTE) {
-        ssremote_t* ssremote = ssremote_init(g_loop, &g_conf);
-        if (!ssremote) {
-            _LOG_E("init ssremote error.");
-            ssev_free(g_loop);
-            return 1;
-        }
-        struct sigaction action;
-        memset(&action, 0, sizeof(struct sigaction));
-        action.sa_handler = signal_handler;
-        sigaction(SIGPIPE, &action, NULL);
-        sigaction(SIGINT, &action, NULL);
-        ssev_run(g_loop);
-        ssremote_free(ssremote);
+
+    sspipe_t* sspipe = sspipe_init(g_loop, &g_conf);
+    if (!sspipe) {
+        _LOG_E("init sspipe error.");
+        ssev_free(g_loop);
+        return 1;
     }
+    struct sigaction action;
+    memset(&action, 0, sizeof(struct sigaction));
+    action.sa_handler = signal_handler;
+    sigaction(SIGPIPE, &action, NULL);
+    sigaction(SIGINT, &action, NULL);
+    ssev_run(g_loop);
+    sspipe_free(sspipe);
+
+    // if (g_conf.mode == SSPIPE_MODE_LOCAL) {
+    //     sslocal_t* sslocal = sslocal_init(g_loop, &g_conf);
+    //     if (!sslocal) {
+    //         _LOG_E("init sslocal error.");
+    //         ssev_free(g_loop);
+    //         return 1;
+    //     }
+    //     struct sigaction action;
+    //     memset(&action, 0, sizeof(struct sigaction));
+    //     action.sa_handler = signal_handler;
+    //     sigaction(SIGPIPE, &action, NULL);
+    //     sigaction(SIGINT, &action, NULL);
+    //     ssev_run(g_loop);
+    //     sslocal_free(sslocal);
+    // } else if (g_conf.mode == SSPIPE_MODE_REMOTE) {
+    //     ssremote_t* ssremote = ssremote_init(g_loop, &g_conf);
+    //     if (!ssremote) {
+    //         _LOG_E("init ssremote error.");
+    //         ssev_free(g_loop);
+    //         return 1;
+    //     }
+    //     struct sigaction action;
+    //     memset(&action, 0, sizeof(struct sigaction));
+    //     action.sa_handler = signal_handler;
+    //     sigaction(SIGPIPE, &action, NULL);
+    //     sigaction(SIGINT, &action, NULL);
+    //     ssev_run(g_loop);
+    //     ssremote_free(ssremote);
+    // }
     ssev_free(g_loop);
     _LOG("Bye");
     sslog_free();
