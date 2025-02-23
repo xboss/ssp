@@ -63,7 +63,7 @@ void ssconn_free(ssconn_t* conn);
 void ssconn_free_all();
 ssconn_t* ssconn_get(int fd);
 int ssconn_close(int fd);
-int ssconn_close_all();
+void ssconn_close_all();
 int ssconn_flush_send_buf(ssconn_t* cp_conn);
 
 
