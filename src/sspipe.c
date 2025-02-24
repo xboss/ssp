@@ -47,7 +47,7 @@ int ssbuffer_grow(ssbuffer_t* ssb, int len) {
 
 // connection start
 
-static ssqueue_t* g_close_fd_queue = NULL;
+// static ssqueue_t* g_close_fd_queue = NULL;
 static ssconn_t* g_conn_tb = NULL;
 
 static int real_close(ssconn_t* conn) {
@@ -110,10 +110,10 @@ void ssconn_free_all() {
         }
         g_conn_tb = NULL;
     }
-    if (g_close_fd_queue) {
-        ssqueue_free(g_close_fd_queue);
-        g_close_fd_queue = NULL;
-    }
+    // if (g_close_fd_queue) {
+    //     ssqueue_free(g_close_fd_queue);
+    //     g_close_fd_queue = NULL;
+    // }
     _LOG("ssconn_free_all ok.");
 }
 
@@ -133,49 +133,53 @@ int ssconn_close(int fd) {
         return _ERR;
     }
     cp_conn->status = PCONN_ST_OFF;
+    real_close(conn);
+    ssconn_free(conn);
+    real_close(cp_conn);
+    ssconn_free(cp_conn);
 
-    if (g_close_fd_queue == NULL) {
-        g_close_fd_queue = ssqueue_init();
-    }
-    int rt = -1;
-    if (!ssqueue_contains(g_close_fd_queue, fd)) {
-        rt = ssqueue_enqueue(g_close_fd_queue, fd);
-        if (rt != _OK) {
-            _LOG_E("ssconn_close ssqueue_enqueue error fd:%d", fd);
-            return _ERR;
-        }
-    }
-    if (!ssqueue_contains(g_close_fd_queue, cp_fd)) {
-        rt = ssqueue_enqueue(g_close_fd_queue, cp_fd);
-        if (rt != _OK) {
-            _LOG_E("ssconn_close ssqueue_enqueue error fd:%d", fd);
-            return _ERR;
-        }
-    }
+    // if (g_close_fd_queue == NULL) {
+    //     g_close_fd_queue = ssqueue_init();
+    // }
+    // int rt = -1;
+    // if (!ssqueue_contains(g_close_fd_queue, fd)) {
+    //     rt = ssqueue_enqueue(g_close_fd_queue, fd);
+    //     if (rt != _OK) {
+    //         _LOG_E("ssconn_close ssqueue_enqueue error fd:%d", fd);
+    //         return _ERR;
+    //     }
+    // }
+    // if (!ssqueue_contains(g_close_fd_queue, cp_fd)) {
+    //     rt = ssqueue_enqueue(g_close_fd_queue, cp_fd);
+    //     if (rt != _OK) {
+    //         _LOG_E("ssconn_close ssqueue_enqueue error fd:%d", fd);
+    //         return _ERR;
+    //     }
+    // }
 
     _LOG("ssconn_close couple fd:%d cp_fd:%d", fd, cp_fd);
     return _OK;
 }
 
-void ssconn_close_all() {
-    if (g_close_fd_queue == NULL) {
-        _LOG("close all g_close_fd_queue is NULL");
-        return;
-    }
-    _LOG("close all fd len:%d", g_close_fd_queue->size);
-    int fd = 0;
-    while (ssqueue_dequeue(g_close_fd_queue, &fd) == _OK) {
-        ssconn_t* conn = ssconn_get(fd);
-        if (!conn) {
-            _LOG("ssconn_close_all ssconn_get conn error fd:%d", fd);
-            continue;
-        }
-        real_close(conn);
-        ssconn_free(conn);
-    }
-    _LOG("close all end");
-    return;
-}
+// void ssconn_close_all() {
+//     if (g_close_fd_queue == NULL) {
+//         _LOG("close all g_close_fd_queue is NULL");
+//         return;
+//     }
+//     _LOG("close all fd len:%d", g_close_fd_queue->size);
+//     int fd = 0;
+//     while (ssqueue_dequeue(g_close_fd_queue, &fd) == _OK) {
+//         ssconn_t* conn = ssconn_get(fd);
+//         if (!conn) {
+//             _LOG("ssconn_close_all ssconn_get conn error fd:%d", fd);
+//             continue;
+//         }
+//         real_close(conn);
+//         ssconn_free(conn);
+//     }
+//     _LOG("close all end");
+//     return;
+// }
 
 int ssconn_flush_send_buf(ssconn_t* cp_conn) {
     if (cp_conn->send_buf->len > 0) {
@@ -183,16 +187,16 @@ int ssconn_flush_send_buf(ssconn_t* cp_conn) {
         assert(rt <= cp_conn->send_buf->len);
         if (rt < 0) {
             // error or closed
-            _LOG_E("ssnet_tcp_send error or closed fd:%d", cp_conn->fd);
+            _LOG_W("ssnet_tcp_send error or closed fd:%d", cp_conn->fd);
             ssconn_close(cp_conn->fd);
             return _ERR;
         }
         if (rt == 0) {
-            _LOG_E("ssnet_tcp_send pending fd:%d", cp_conn->cp_fd);
+            _LOG_W("ssnet_tcp_send pending fd:%d", cp_conn->cp_fd);
             return _OK;
         }
         if (rt != cp_conn->send_buf->len) {
-            _LOG_E("ssnet_tcp_send remain. fd:%d", cp_conn->cp_fd);
+            _LOG_W("ssnet_tcp_send remain. fd:%d", cp_conn->cp_fd);
             memmove(cp_conn->send_buf->buf, cp_conn->send_buf->buf + rt, cp_conn->send_buf->len - rt);
             cp_conn->send_buf->len -= rt;
             assert(cp_conn->send_buf->len >= 0);
@@ -232,12 +236,12 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
     assert(cp_conn->cp_fd > 0);
 
     if (conn->status == PCONN_ST_OFF) {
-        _LOG_E("on_recv conn is closed fd:%d", conn->fd);
-        ssconn_close(conn->cp_fd);
+        _LOG_W("on_recv conn is closed fd:%d", conn->fd);
+        ssconn_close(conn->fd);
         return _ERR;
     }
     if (cp_conn->status == PCONN_ST_OFF) {
-        _LOG_E("on_recv cp_conn is closedfd:%d", cp_conn->fd);
+        _LOG_W("on_recv cp_conn is closedfd:%d", cp_conn->fd);
         ssconn_close(cp_conn->cp_fd);
         return _ERR;
     }
@@ -257,11 +261,15 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
     conn->recv_buf->len += len;
 
     if (conn->status != PCONN_ST_ON || cp_conn->status != PCONN_ST_ON) {
-        _LOG_E("on_recv conn status not ON");
+        _LOG_W("on_recv conn status not ON");
         return _ERR;
     }
 
-    ssconn_flush_send_buf(cp_conn);
+    rt = ssconn_flush_send_buf(cp_conn);
+    if (rt != _OK) {
+        _LOG_E("on_recv ssconn_flush_send_buf error");
+        return _ERR;
+    }
 
     int is_pack = (sspipe->config->mode == SSPIPE_MODE_LOCAL && conn->type == SSCONN_TYPE_SERV) ||
                   (sspipe->config->mode == SSPIPE_MODE_REMOTE && conn->type == SSCONN_TYPE_CLI);
@@ -292,7 +300,11 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
 
         conn->recv_buf->len = 0;
 
-        ssconn_flush_send_buf(cp_conn);
+        rt = ssconn_flush_send_buf(cp_conn);
+        if (rt != _OK) {
+            _LOG_E("on_recv pack ssconn_flush_send_buf error");
+            return _ERR;
+        }
     } else {
         int ciphertext_len = 0;
         int plain_text_len = 0;
@@ -335,7 +347,11 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
             conn->recv_buf->len -= PACKET_HEAD_LEN + ciphertext_len;
             assert(conn->recv_buf->len >= 0);
 
-            ssconn_flush_send_buf(cp_conn);
+            rt = ssconn_flush_send_buf(cp_conn);
+            if (rt != _OK) {
+                _LOG_E("on_recv unpack ssconn_flush_send_buf error");
+                return _ERR;
+            }
         }
     }
     return _OK;
@@ -362,7 +378,7 @@ static int on_accept(ssnet_t* net, int serv_fd) {
         return _ERR;
     }
 
-    ssconn_close_all();
+    // ssconn_close_all();
     // debug
     assert(ssconn_get(serv_fd) == NULL);
     assert(ssconn_get(back_fd) == NULL);
@@ -424,8 +440,9 @@ static int on_update(ssev_loop_t* loop, void* ud) {
     // assert(net);
     // _GET_SSPIPE_FROM_NET;
 
-    _LOG("on_update start queue len:%d", g_close_fd_queue ? g_close_fd_queue->size : 0);
-    ssconn_close_all();
+    // _LOG("on_update start queue len:%d", g_close_fd_queue ? g_close_fd_queue->size : 0);
+    // ssconn_close_all();
+
     // _LOG("on_update end queue len:%d", g_close_fd_queue ? g_close_fd_queue->size : 0);
     return _OK;
 }

@@ -63,18 +63,17 @@ void ssconn_free(ssconn_t* conn);
 void ssconn_free_all();
 ssconn_t* ssconn_get(int fd);
 int ssconn_close(int fd);
-void ssconn_close_all();
+// void ssconn_close_all();
 int ssconn_flush_send_buf(ssconn_t* cp_conn);
 
-
 typedef struct {
-    ssev_loop_t *loop;
-    ssconfig_t *config;
-    ssnet_t *net;
+    ssev_loop_t* loop;
+    ssconfig_t* config;
+    ssnet_t* net;
     int listen_fd;
 } sspipe_t;
 
-sspipe_t *sspipe_init(ssev_loop_t *loop, ssconfig_t *config);
-void sspipe_free(sspipe_t *sspipe);
+sspipe_t* sspipe_init(ssev_loop_t* loop, ssconfig_t* config);
+void sspipe_free(sspipe_t* sspipe);
 
 #endif /* _SSPIPE_H */
