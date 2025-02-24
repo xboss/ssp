@@ -117,6 +117,7 @@ void ssqueue_free(ssqueue_t* queue) {
         }
 
         free(queue);
+        printf("ssqueue_free ok.\n");
     }
 }
 

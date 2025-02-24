@@ -101,17 +101,20 @@ void ssconn_free(ssconn_t* conn) {
 }
 
 void ssconn_free_all() {
-    if (!g_conn_tb) {
-        return;
+    _LOG("ssconn_free_all start. g_conn_tb:%p", g_conn_tb);
+    if (g_conn_tb) {
+        ssconn_t *conn, *tmp;
+        HASH_ITER(hh, g_conn_tb, conn, tmp) {
+            real_close(conn);
+            ssconn_free(conn);
+        }
+        g_conn_tb = NULL;
     }
-    ssconn_t *conn, *tmp;
-    HASH_ITER(hh, g_conn_tb, conn, tmp) {
-        real_close(conn);
-        ssconn_free(conn);
+    if (g_close_fd_queue) {
+        ssqueue_free(g_close_fd_queue);
+        g_close_fd_queue = NULL;
     }
-    g_conn_tb = NULL;
-    ssqueue_free(g_close_fd_queue);
-    g_close_fd_queue = NULL;
+    _LOG("ssconn_free_all ok.");
 }
 
 int ssconn_close(int fd) {
@@ -464,6 +467,7 @@ void sspipe_free(sspipe_t* sspipe) {
             ssnet_free(sspipe->net);
         }
         free(sspipe);
+        _LOG("sspipe_free ok.");
     }
     return;
 }
