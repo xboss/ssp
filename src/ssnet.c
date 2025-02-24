@@ -167,7 +167,7 @@ static int tcp_ssev_cb(ssev_loop_t *loop, unsigned int event, int fd, void *ud) 
             memset(net->read_buf, 0, net->read_buf_size); /* TODO: debug */
             ret = read(fd, net->read_buf, net->read_buf_size);
             if (ret == 0) {
-                perror("read error");
+                // perror("read error");
                 _LOG_W("tcp_ssev_cb close fd:%d", fd);
                 net->on_close(net, fd);
                 /* close(fd); */
