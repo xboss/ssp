@@ -459,12 +459,12 @@ void sspipe_free(sspipe_t* sspipe) {
         if (sspipe->listen_fd > 0) {
             ssnet_tcp_stop_server(sspipe->net, sspipe->listen_fd);
         }
+        ssconn_free_all();
         if (sspipe->net) {
             ssnet_free(sspipe->net);
         }
         free(sspipe);
     }
-    ssconn_free_all();
     return;
 }
 
