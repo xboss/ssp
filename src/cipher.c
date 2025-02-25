@@ -7,6 +7,7 @@
 #include <string.h>
 
 static const int align_size = AES_BLOCK_SIZE;
+
 static char *pkcs7_padding(const char *in, int in_len, int *out_len) {
     int remainder = in_len % align_size;
     int padding_size = remainder == 0 ? align_size : align_size - remainder;
@@ -23,6 +24,14 @@ static char *pkcs7_padding(const char *in, int in_len, int *out_len) {
 
 static int pkcs7_unpadding(const char *in, int in_len) {
     char padding_size = in[in_len - 1];
+    if (padding_size < 1 || padding_size > align_size) {
+        return -1;  // Invalid padding size
+    }
+    for (int i = 0; i < padding_size; i++) {
+        if (in[in_len - 1 - i] != padding_size) {
+            return -1;  // Invalid padding
+        }
+    }
     return (int)padding_size;
 }
 
@@ -81,22 +90,22 @@ char *aes_decrypt(const char *key, const char *in, int in_len, int *out_len) {
         po += AES_BLOCK_SIZE;
         en_len += AES_BLOCK_SIZE;
     }
-    *out_len = in_len - pkcs7_unpadding(out, en_len);
+    int padding_size = pkcs7_unpadding(out, en_len);
+    if (padding_size < 0) {
+        free(out);
+        return NULL;  // Invalid padding
+    }
+    *out_len = in_len - padding_size;
     return out;
 }
 
 // int main(int argc, char const *argv[])
 // {
-//     char plain_text[20] = {0x05,0x01,0x00,0x03,0x0d,0x77,0x77,0x77,0x2e,0x62,0x61,0x69,0x64,0x75,0x2e,0x63,0x6f,0x6d,0x01,0xbb};
-//     char *keyp = "yourpassword";
-//     char key[17] = {0};
-//     pwd2key(key, 16, keyp, strlen(keyp));
-//     int cipher_len = 0;
-//     char *cipher_text = aes_encrypt(key, plain_text, sizeof(plain_text), &cipher_len);
-//     assert(cipher_text);
-//     int plain_len = 0;
-//     char *plain_text2 = aes_decrypt(key, cipher_text, cipher_len, &plain_len);
-//     assert(plain_text2);
+//     char plain_text[20] =
+//     {0x05,0x01,0x00,0x03,0x0d,0x77,0x77,0x77,0x2e,0x62,0x61,0x69,0x64,0x75,0x2e,0x63,0x6f,0x6d,0x01,0xbb}; char *keyp
+//     = "yourpassword"; char key[17] = {0}; pwd2key(key, 16, keyp, strlen(keyp)); int cipher_len = 0; char *cipher_text
+//     = aes_encrypt(key, plain_text, sizeof(plain_text), &cipher_len); assert(cipher_text); int plain_len = 0; char
+//     *plain_text2 = aes_decrypt(key, cipher_text, cipher_len, &plain_len); assert(plain_text2);
 
 //     free(cipher_text);
 //     free(plain_text2);

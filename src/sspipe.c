@@ -47,7 +47,6 @@ int ssbuffer_grow(ssbuffer_t* ssb, int len) {
 
 // connection start
 
-// static ssqueue_t* g_close_fd_queue = NULL;
 static ssconn_t* g_conn_tb = NULL;
 
 static int real_close(ssconn_t* conn) {
@@ -110,10 +109,6 @@ void ssconn_free_all() {
         }
         g_conn_tb = NULL;
     }
-    // if (g_close_fd_queue) {
-    //     ssqueue_free(g_close_fd_queue);
-    //     g_close_fd_queue = NULL;
-    // }
     _LOG("ssconn_free_all ok.");
 }
 
@@ -137,49 +132,9 @@ int ssconn_close(int fd) {
     ssconn_free(conn);
     real_close(cp_conn);
     ssconn_free(cp_conn);
-
-    // if (g_close_fd_queue == NULL) {
-    //     g_close_fd_queue = ssqueue_init();
-    // }
-    // int rt = -1;
-    // if (!ssqueue_contains(g_close_fd_queue, fd)) {
-    //     rt = ssqueue_enqueue(g_close_fd_queue, fd);
-    //     if (rt != _OK) {
-    //         _LOG_E("ssconn_close ssqueue_enqueue error fd:%d", fd);
-    //         return _ERR;
-    //     }
-    // }
-    // if (!ssqueue_contains(g_close_fd_queue, cp_fd)) {
-    //     rt = ssqueue_enqueue(g_close_fd_queue, cp_fd);
-    //     if (rt != _OK) {
-    //         _LOG_E("ssconn_close ssqueue_enqueue error fd:%d", fd);
-    //         return _ERR;
-    //     }
-    // }
-
     _LOG("ssconn_close couple fd:%d cp_fd:%d", fd, cp_fd);
     return _OK;
 }
-
-// void ssconn_close_all() {
-//     if (g_close_fd_queue == NULL) {
-//         _LOG("close all g_close_fd_queue is NULL");
-//         return;
-//     }
-//     _LOG("close all fd len:%d", g_close_fd_queue->size);
-//     int fd = 0;
-//     while (ssqueue_dequeue(g_close_fd_queue, &fd) == _OK) {
-//         ssconn_t* conn = ssconn_get(fd);
-//         if (!conn) {
-//             _LOG("ssconn_close_all ssconn_get conn error fd:%d", fd);
-//             continue;
-//         }
-//         real_close(conn);
-//         ssconn_free(conn);
-//     }
-//     _LOG("close all end");
-//     return;
-// }
 
 int ssconn_flush_send_buf(ssconn_t* cp_conn) {
     if (cp_conn->send_buf->len > 0) {
@@ -187,12 +142,12 @@ int ssconn_flush_send_buf(ssconn_t* cp_conn) {
         assert(rt <= cp_conn->send_buf->len);
         if (rt < 0) {
             // error or closed
-            _LOG_W("ssnet_tcp_send error or closed fd:%d", cp_conn->fd);
+            _LOG_W("ssconn_flush_send_buf error or closed fd:%d", cp_conn->fd);
             ssconn_close(cp_conn->fd);
             return _ERR;
         }
         if (rt == 0) {
-            _LOG_W("ssnet_tcp_send pending fd:%d", cp_conn->cp_fd);
+            _LOG_W("ssconn_flush_send_buf pending fd:%d", cp_conn->cp_fd);
             return _OK;
         }
         if (rt != cp_conn->send_buf->len) {
@@ -216,6 +171,8 @@ int ssconn_flush_send_buf(ssconn_t* cp_conn) {
 #define _GET_SSPIPE_FROM_NET                               \
     sspipe_t* sspipe = (sspipe_t*)ssnet_get_userdata(net); \
     assert(sspipe)
+
+static char packet_tag[] = {'S', 'S', 'P'};
 
 static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
     _LOG("sspipe on_recv fd:%d len:%d", fd, len);
@@ -255,10 +212,12 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
     int rt = ssbuffer_grow(conn->recv_buf, len);
     if (rt != _OK) {
         _LOG_E("on_recv ssbuffer_grow recv_buf error");
+        ssconn_close(conn->fd);
         return _ERR;
     }
     memcpy(conn->recv_buf->buf + conn->recv_buf->len, buf, len);
     conn->recv_buf->len += len;
+    assert(conn->recv_buf->len > 0);
 
     if (conn->status != PCONN_ST_ON || cp_conn->status != PCONN_ST_ON) {
         _LOG_W("on_recv conn status not ON");
@@ -275,6 +234,16 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
                   (sspipe->config->mode == SSPIPE_MODE_REMOTE && conn->type == SSCONN_TYPE_CLI);
 
     if (is_pack) {
+        int rt = ssbuffer_grow(conn->recv_buf, sizeof(packet_tag));
+        if (rt != _OK) {
+            _LOG_E("on_recv ssbuffer_grow recv_buf error");
+            ssconn_close(conn->fd);
+            return _ERR;
+        }
+        memcpy(conn->recv_buf->buf + conn->recv_buf->len, packet_tag, sizeof(packet_tag));
+        conn->recv_buf->len += sizeof(packet_tag);
+        assert(conn->recv_buf->len > 0);
+
         // encrypt
         int ciphertext_len = 0;
         char* cipher_text = aes_encrypt(sspipe->config->key, conn->recv_buf->buf, conn->recv_buf->len, &ciphertext_len);
@@ -285,7 +254,7 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
         }
 
         // pack and send to buffer
-        rt = ssbuffer_grow(cp_conn->send_buf, ciphertext_len + PACKET_HEAD_LEN);
+        rt = ssbuffer_grow(cp_conn->send_buf, ciphertext_len + PACKET_HEAD_LEN + sizeof(packet_tag));
         if (rt != _OK) {
             _LOG_E("on_recv ssbuffer_grow send_buf error");
             ssconn_close(conn->fd);
@@ -331,15 +300,24 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
                 return _ERR;
             }
 
+            assert(plain_text_len > sizeof(packet_tag));
+
+            // check packet tag
+            if (memcmp(plain_text + plain_text_len - sizeof(packet_tag), packet_tag, sizeof(packet_tag)) != 0) {
+                _LOG_E("on_recv packet_tag error");
+                ssconn_close(conn->fd);
+                return _ERR;
+            }
+
             // send to buffer
-            rt = ssbuffer_grow(cp_conn->send_buf, plain_text_len);
+            rt = ssbuffer_grow(cp_conn->send_buf, plain_text_len - sizeof(packet_tag));
             if (rt != _OK) {
                 _LOG_E("on_recv ssbuffer_grow send_buf error");
                 ssconn_close(conn->fd);
                 return _ERR;
             }
-            memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, plain_text, plain_text_len);
-            cp_conn->send_buf->len += plain_text_len;
+            memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, plain_text, plain_text_len - sizeof(packet_tag));
+            cp_conn->send_buf->len += plain_text_len - sizeof(packet_tag);
             free(plain_text);
 
             memmove(conn->recv_buf->buf, conn->recv_buf->buf + PACKET_HEAD_LEN + ciphertext_len,
