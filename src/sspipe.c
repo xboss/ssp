@@ -1,7 +1,5 @@
 #include "sspipe.h"
 
-#include "ssqueue.h"
-
 // ssbuffer start
 
 ssbuffer_t* ssbuffer_init() {
