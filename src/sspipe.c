@@ -281,7 +281,7 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
         while (conn->recv_buf->len > PACKET_HEAD_LEN) {
             // unpack
             ciphertext_len = ntohl(*(int*)conn->recv_buf->buf);
-            if (ciphertext_len <= 0 || ciphertext_len > 65535) { /* TODO: magic number */
+            if (ciphertext_len <= 0 || ciphertext_len > net->read_buf_size * 10) { /* TODO: magic number */
                 _LOG_E("on_recv ciphertext_len:%d error. recv_buf->len:%d", ciphertext_len, conn->recv_buf->len);
                 ssconn_close(conn->fd);
                 return _ERR;
@@ -306,6 +306,7 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
             if (memcmp(plain_text + plain_text_len - sizeof(packet_tag), packet_tag, sizeof(packet_tag)) != 0) {
                 _LOG_E("on_recv packet_tag error");
                 ssconn_close(conn->fd);
+                free(plain_text);
                 return _ERR;
             }
 
@@ -314,6 +315,7 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
             if (rt != _OK) {
                 _LOG_E("on_recv ssbuffer_grow send_buf error");
                 ssconn_close(conn->fd);
+                free(plain_text);
                 return _ERR;
             }
             memcpy(cp_conn->send_buf->buf + cp_conn->send_buf->len, plain_text, plain_text_len - sizeof(packet_tag));

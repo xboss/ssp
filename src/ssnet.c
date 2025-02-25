@@ -26,30 +26,6 @@
 
 #define DEF_READ_BUF_SIZE (1024)
 
-struct ssnet_tcp_server_s {
-    int listen_fd;
-};
-typedef struct ssnet_tcp_server_s ssnet_tcp_server_t;
-
-struct ssnet_udp_s {
-    int fd;
-    struct sockaddr_in addr;
-};
-typedef struct ssnet_udp_s ssnet_udp_t;
-
-struct ssnet_s {
-    ssev_loop_t *loop;
-    char *read_buf;
-    int read_buf_size;
-    ssnet_recv_cb_t on_recv;
-    ssnet_close_cb_t on_close;
-    ssnet_writable_cb_t on_writable;
-    ssnet_accept_cb_t on_accept;
-    ssnet_tcp_server_t *tcp_server;
-    // ssnet_udp_t *udp;
-    void *userdata;
-};
-
 /* ---------------------------------------- */
 
 static void setreuseaddr(int fd) {

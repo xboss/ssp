@@ -12,6 +12,29 @@ typedef int (*ssnet_close_cb_t)(ssnet_t *net, int fd);
 typedef int (*ssnet_accept_cb_t)(ssnet_t *net, int fd);
 typedef int (*ssnet_writable_cb_t)(ssnet_t *net, int fd);
 
+typedef struct {
+    int listen_fd;
+} ssnet_tcp_server_t;
+
+// struct ssnet_udp_s {
+//     int fd;
+//     struct sockaddr_in addr;
+// };
+// typedef struct ssnet_udp_s ssnet_udp_t;
+
+struct ssnet_s {
+    ssev_loop_t *loop;
+    char *read_buf;
+    int read_buf_size;
+    ssnet_recv_cb_t on_recv;
+    ssnet_close_cb_t on_close;
+    ssnet_writable_cb_t on_writable;
+    ssnet_accept_cb_t on_accept;
+    ssnet_tcp_server_t *tcp_server;
+    // ssnet_udp_t *udp;
+    void *userdata;
+};
+
 ssnet_t *ssnet_init(ssev_loop_t *loop, int read_buf_size);
 void ssnet_free(ssnet_t *net);
 
