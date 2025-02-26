@@ -46,7 +46,7 @@ typedef struct {
 } ssconfig_t;
 
 typedef enum { SSCONN_TYPE_NONE = 0, SSCONN_TYPE_SERV, SSCONN_TYPE_CLI } ssconn_type_t;
-typedef enum { PCONN_ST_NONE = 0, PCONN_ST_OFF, PCONN_ST_WAIT, PCONN_ST_ON } ssconn_st_t;
+typedef enum { SSCONN_ST_NONE = 0, SSCONN_ST_OFF, SSCONN_ST_WAIT, SSCONN_ST_ON } ssconn_st_t;
 typedef struct {
     int fd;
     int cp_fd;

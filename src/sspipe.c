@@ -52,7 +52,7 @@ static int real_close(ssconn_t* conn) {
     assert(conn->fd > 0);
     ssnet_t* net = conn->net;
     assert(net);
-    conn->status = PCONN_ST_OFF;
+    conn->status = SSCONN_ST_OFF;
     ssnet_tcp_close(net, conn->fd);
     _LOG("real_close ok. fd:%d", conn->fd);
     return _OK;
@@ -117,7 +117,7 @@ int ssconn_close(int fd) {
         _LOG("ssconn_close ssconn_get conn error fd:%d", fd);
         return _ERR;
     }
-    conn->status = PCONN_ST_OFF;
+    conn->status = SSCONN_ST_OFF;
     int cp_fd = conn->cp_fd;
     ssconn_t* cp_conn = ssconn_get(cp_fd);
     if (!cp_conn) {
@@ -125,7 +125,7 @@ int ssconn_close(int fd) {
         assert(0); /* TODO: debug */
         return _ERR;
     }
-    cp_conn->status = PCONN_ST_OFF;
+    cp_conn->status = SSCONN_ST_OFF;
     real_close(conn);
     ssconn_free(conn);
     real_close(cp_conn);
@@ -190,12 +190,12 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
     }
     assert(cp_conn->cp_fd > 0);
 
-    if (conn->status == PCONN_ST_OFF) {
+    if (conn->status == SSCONN_ST_OFF) {
         _LOG_W("on_recv conn is closed fd:%d", conn->fd);
         ssconn_close(conn->fd);
         return _ERR;
     }
-    if (cp_conn->status == PCONN_ST_OFF) {
+    if (cp_conn->status == SSCONN_ST_OFF) {
         _LOG_W("on_recv cp_conn is closedfd:%d", cp_conn->fd);
         ssconn_close(cp_conn->cp_fd);
         return _ERR;
@@ -217,7 +217,7 @@ static int on_recv(ssnet_t* net, int fd, const char* buf, int len) {
     conn->recv_buf->len += len;
     assert(conn->recv_buf->len > 0);
 
-    if (conn->status != PCONN_ST_ON || cp_conn->status != PCONN_ST_ON) {
+    if (conn->status != SSCONN_ST_ON || cp_conn->status != SSCONN_ST_ON) {
         _LOG_W("on_recv conn status not ON");
         return _ERR;
     }
@@ -361,14 +361,14 @@ static int on_accept(ssnet_t* net, int serv_fd) {
     assert(ssconn_get(serv_fd) == NULL);
     assert(ssconn_get(back_fd) == NULL);
 
-    front_conn = ssconn_init(serv_fd, back_fd, SSCONN_TYPE_SERV, PCONN_ST_WAIT, sspipe->net);
+    front_conn = ssconn_init(serv_fd, back_fd, SSCONN_TYPE_SERV, SSCONN_ST_WAIT, sspipe->net);
     if (!front_conn) {
         _LOG_E("on_accept ssconn_init front_conn error fd:%d", serv_fd);
         ssnet_tcp_close(sspipe->net, serv_fd);
         ssnet_tcp_close(sspipe->net, back_fd);
         return _ERR;
     }
-    back_conn = ssconn_init(back_fd, serv_fd, SSCONN_TYPE_CLI, PCONN_ST_WAIT, sspipe->net);
+    back_conn = ssconn_init(back_fd, serv_fd, SSCONN_TYPE_CLI, SSCONN_ST_WAIT, sspipe->net);
     if (!back_conn) {
         _LOG_E("on_accept ssconn_init back_conn error fd:%d", back_fd);
         ssnet_tcp_close(sspipe->net, serv_fd);
@@ -384,13 +384,13 @@ static int on_back_connected(sspipe_t* sspipe, ssconn_t* back_conn) {
     assert(back_conn->cp_fd > 0);
     _LOG("on_connected fd:%d", back_conn->fd);
     ssconn_t* front_conn = ssconn_get(back_conn->cp_fd);
-    if (!front_conn || front_conn->status == PCONN_ST_OFF) {
+    if (!front_conn || front_conn->status == SSCONN_ST_OFF) {
         _LOG_E("on_back_connected ssconn_get front_conn error fd:%d", back_conn->cp_fd);
         ssconn_close(back_conn->fd);
         return _ERR;
     }
-    front_conn->status = PCONN_ST_ON;
-    back_conn->status = PCONN_ST_ON;
+    front_conn->status = SSCONN_ST_ON;
+    back_conn->status = SSCONN_ST_ON;
     if (front_conn->recv_buf->len > 0) {
         on_recv(sspipe->net, front_conn->fd, NULL, 0);
     }

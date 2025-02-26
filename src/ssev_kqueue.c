@@ -83,7 +83,11 @@ static ssev_watcher_t *get_watcher(ssev_loop_t *loop, int fd) {
 }
 
 static int add_watcher(ssev_loop_t *loop, ssev_watcher_t *w) {
-    if (!w) {
+    if (!loop || !w) {
+        return SSEV_ERR;
+    }
+    if (get_watcher(loop, w->fd)) {
+        _LOG_W("add_watcher watcher already exists. fd:%d", w->fd);
         return SSEV_ERR;
     }
     HASH_ADD_INT(loop->watchers, fd, w);
