@@ -65,13 +65,15 @@ static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
 
 /////////////////////////
 
+typedef enum { RS_RET_ERR = -1, RS_RET_OK, RS_RET_CLOSE, RS_RET_MORE } rs_ret;
+
 /**
  * @brief
  * @param ssb
  * @param client
  * @return 0: ok, 1: need more data (continue), -1: error(break)
  */
-int unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd) {
+rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd) {
     assert(ssb);
     assert(pipe);
     assert(fd >= 0);
@@ -79,20 +81,20 @@ int unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd) {
     uint32_t payload_len = 0;
     int remaining = 0;
     while (ssb->len > 0) {
-        if (ssb->len < PACKET_HEAD_LEN) return 1;
+        if (ssb->len < PACKET_HEAD_LEN) return RS_RET_MORE;
         payload_len = ntohl(*(uint32_t*)ssb->buf);
         if (payload_len > 65536 || payload_len <= 0) { /* TODO: */
             _LOG_E("payload_len:%d error. max_payload:%d", payload_len, 65536);
-            return -1;
+            return RS_RET_ERR;
         }
-        if (ssb->len < payload_len + PACKET_HEAD_LEN) return 1;
+        if (ssb->len < payload_len + PACKET_HEAD_LEN) return RS_RET_MORE;
 
         /* TODO: decrypt */
 
         rt = sstcp_send(fd, ssb->buf + PACKET_HEAD_LEN, payload_len);
         if (rt < 0) {
             perror("unpack_send to target failed");
-            return -1;
+            return RS_RET_ERR;
         }
         _LOG("unpack_send to target ok.");
 
@@ -103,7 +105,7 @@ int unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd) {
         }
         ssb->len = remaining;
     }
-    return 0;
+    return RS_RET_OK;
 }
 
 /**
@@ -128,13 +130,13 @@ int pack_send(int fd, const char* buf, int len) {
         rt = sstcp_send(fd, (char*)&payload_len_net, PACKET_HEAD_LEN);
         if (rt < 0) {
             _LOG_E("pack_send to target failed");
-            return -1;
+            return RS_RET_ERR;
         }
         assert(rt == PACKET_HEAD_LEN);
         rt = sstcp_send(fd, buf + (len - remaining), payload_len);
         if (rt < 0) {
             _LOG_E("pack_send to target failed");
-            return -1;
+            return RS_RET_ERR;
         }
         _LOG("pack_send to target ok. rt:%d payload_len:%d", rt, payload_len);
         // assert(rt == payload_len);
@@ -142,7 +144,7 @@ int pack_send(int fd, const char* buf, int len) {
         remaining = remaining - rt;
         assert(remaining >= 0);
     }
-    return 0;
+    return RS_RET_OK;
 }
 
 /**
@@ -155,12 +157,13 @@ static int recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_
     // 读取客户端数据
     int rlen = 0;
     int rt = 0;
-    // while (server->running) {
     rlen = sstcp_receive(recv_fd, buffer, sizeof(buffer));
-    if (rlen <= 0) {
+    if (rlen == 0) {
+        _LOG("client closed.");
+        return RS_RET_CLOSE;
+    } else if (rlen < 0) {
         perror("recv failed");
-        // break;
-        return _ERR;
+        return RS_RET_ERR;
     }
     _LOG("Received: %d", rlen);
 
@@ -169,11 +172,11 @@ static int recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_
         if (rt == -1) {
             _LOG_E("pack_send error.");
             // break;
-            return _ERR;
+            return RS_RET_ERR;
         } else if (rt == 1) {
             _LOG("need more data.");
             // continue;
-            return 1;
+            return RS_RET_MORE;
         }
         _LOG("pack_send ok.");
     } else {
@@ -181,7 +184,7 @@ static int recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_
         if (rt != _OK) {
             _LOG_E("ssbuffer_grow failed");
             // break;
-            return _ERR;
+            return RS_RET_ERR;
         }
         memcpy(ssb->buf + ssb->len, buffer, rlen);
         ssb->len += rlen;
@@ -189,16 +192,15 @@ static int recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_
         if (rt == -1) {
             _LOG_E("unpack_send error.");
             // break;
-            return _ERR;
+            return RS_RET_ERR;
         } else if (rt == 1) {
             _LOG("need more data.");
             // continue;
-            return 1;
+            return RS_RET_MORE;
         }
         _LOG("unpack_send ok.");
     }
-    // }
-    return _OK;
+    return RS_RET_OK;
 }
 
 void handle_front(int front_fd, sstcp_server_t* server) {
@@ -250,9 +252,10 @@ void handle_front(int front_fd, sstcp_server_t* server) {
         is_pack = 1;
     }
 
-    char buffer[RECV_BUF_SIZE] = {0};
+    int is_stop = 0;
+    rs_ret rs = RS_RET_OK;
     struct pollfd fds[2] = {{.fd = front_fd, .events = POLLIN}, {.fd = backend->client_fd, .events = POLLIN}};
-    while (pipe->server->running) {
+    while (pipe->server->running && !is_stop) {
         rt = poll(fds, 2, RECV_TIMEOUT);
         if (rt < 0) {
             if (errno == EINTR || errno == EAGAIN) {
@@ -270,24 +273,22 @@ void handle_front(int front_fd, sstcp_server_t* server) {
             if (fds[i].revents & POLLIN) {
                 if (fds[i].fd == front_fd) {
                     // read front data
-                    rt = recv_and_send(front_fd, backend->client_fd, pipe, server, front_ssb, is_pack);
-                    if (rt == _ERR) {
-                        _LOG_E("front recv_and_send error.");
-                        break;
-                    } else if (rt == 1) {
-                        _LOG("front need more data.");
-                        continue;
-                    }
+                    rs = recv_and_send(front_fd, backend->client_fd, pipe, server, front_ssb, is_pack);
                 } else {
                     // read backend data
-                    rt = recv_and_send(backend->client_fd, front_fd, pipe, server, backend_ssb, !is_pack);
-                    if (rt == _ERR) {
-                        _LOG_E("backend recv_and_send error.");
-                        break;
-                    } else if (rt == 1) {
-                        _LOG("backend need more data.");
-                        continue;
-                    }
+                    rs = recv_and_send(backend->client_fd, front_fd, pipe, server, backend_ssb, !is_pack);
+                }
+                if (rs == RS_RET_CLOSE) {
+                    _LOG_E("recv_and_send close. fd:%d", fds[i].fd);
+                    is_stop = 1;
+                    break;
+                } else if (rs == RS_RET_MORE) {
+                    _LOG("need more data. fd:%d", fds[i].fd);
+                    continue;
+                } else if (rs == RS_RET_ERR) {
+                    _LOG_E("recv_and_send error. fd:%d", fds[i].fd);
+                    is_stop = 1;
+                    break;
                 }
             }
         }
