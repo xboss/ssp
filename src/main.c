@@ -1,12 +1,11 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include <signal.h>
 
 #include "ss.h"
 #include "ssconf.h"
@@ -124,20 +123,20 @@ int main(int argc, char const* argv[]) {
     sslog_init(g_conf.log_file, g_conf.log_level);
     if (g_conf.log_file) free(g_conf.log_file);
 
+    // 忽略SIGPIPE信号
+    signal(SIGPIPE, SIG_IGN);
+
     g_pipe = sspipe_init(&g_conf);
     if (!g_pipe) {
         _LOG_E("init pipe error.");
         return 1;
     }
 
-    // 忽略SIGPIPE信号
-    signal(SIGPIPE, SIG_IGN);
-
-    rt = sstcp_start_server(g_pipe->server);
+    rt = sspipe_start(g_pipe);
     if (rt != _OK) {
         _LOG_E("start server error.");
     }
-    sstcp_stop_server(g_pipe->server);
+
     sspipe_free(g_pipe);
     sslog_free();
     printf("Bye\n");

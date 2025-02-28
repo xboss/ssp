@@ -147,12 +147,12 @@ int sstcp_start_server(sstcp_server_t *server) {
 
 // 停止服务器
 void sstcp_stop_server(sstcp_server_t *server) {
-    server->running = 0;
 #ifdef _WIN32
     closesocket(server->server_fd);
 #else
     close(server->server_fd);
 #endif
+    server->running = 0;
 }
 
 // 释放服务器资源

@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,52 +10,14 @@
 #include "cipher.h"
 #include "sslog.h"
 
-/* ---------- protocol ----------- */
 #define PACKET_HEAD_LEN 4
-#define MAX_PAYLOAD_LEN (1024 * 1)
-#define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN) * 2
+// #define MAX_PAYLOAD_LEN (1024 * 1)
+#define RECV_BUF_SIZE 1024 * 10
+// #define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN) * 2
 #define RECV_TIMEOUT 1000 * 60
-#define SEND_TIMEOUT 1000 * 60
+// #define SEND_TIMEOUT 1000 * 60
 
-/* --------------------- */
-
-// static char* encrypt_and_pack(int fd, const char* buf, int len, char* key, int* pk_len) {
-//     char* cihper = (char*)buf;
-//     int cipher_len = len;
-//     char* pk_buf = (char*)cihper;
-//     *pk_len = cipher_len;
-//     if (pconn_is_secret(fd)) {
-//         assert(fd > 0);
-//         cihper = aes_encrypt(key, buf, len, &cipher_len);
-//         _LOG("encrypt ");
-//         assert(cipher_len % 16 == 0);
-//         *pk_len = pack(cipher_len, cihper, &pk_buf);
-//         free(cihper);
-//         assert(*pk_len >= 0);
-//     }
-//     return pk_buf;
-// }
-
-void echo(int client_socket, sstcp_server_t* server) {
-    char buffer[1024] = {0};
-    // char* hello = "Hello from server";
-    // 读取客户端数据
-    int valread = 0;
-    while (server->running) {
-        memset(buffer, 0, sizeof(buffer));
-        valread = sstcp_receive(client_socket, buffer, 1024);
-        if (valread > 0) {
-            _LOG("Received: %s", buffer);
-            // 发送响应
-            // sstcp_send(client_socket, hello, strlen(hello));
-            sstcp_send(client_socket, buffer, valread);
-            _LOG("Hello message sent to client");
-        } else {
-            perror("recv failed");
-            break;
-        }
-    }
-}
+/////////////////////////
 
 typedef struct {
     char* buf;  // 动态缓冲区
@@ -100,6 +63,8 @@ static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
     return _OK;
 }
 
+/////////////////////////
+
 /**
  * @brief
  * @param ssb
@@ -116,8 +81,8 @@ int unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd) {
     while (ssb->len > 0) {
         if (ssb->len < PACKET_HEAD_LEN) return 1;
         payload_len = ntohl(*(uint32_t*)ssb->buf);
-        if (payload_len > MAX_PAYLOAD_LEN || payload_len <= 0) {
-            _LOG_E("payload_len:%d error. max_payload:%d", payload_len, MAX_PAYLOAD_LEN);
+        if (payload_len > 65536 || payload_len <= 0) { /* TODO: */
+            _LOG_E("payload_len:%d error. max_payload:%d", payload_len, 65536);
             return -1;
         }
         if (ssb->len < payload_len + PACKET_HEAD_LEN) return 1;
@@ -157,7 +122,8 @@ int pack_send(int fd, const char* buf, int len) {
         /* TODO: encrypt */
 
         // pack and send
-        payload_len = remaining > MAX_PAYLOAD_LEN ? MAX_PAYLOAD_LEN : remaining;
+        // payload_len = remaining > MAX_PAYLOAD_LEN ? MAX_PAYLOAD_LEN : remaining;
+        payload_len = remaining;
         uint32_t payload_len_net = htonl(payload_len);
         rt = sstcp_send(fd, (char*)&payload_len_net, PACKET_HEAD_LEN);
         if (rt < 0) {
@@ -181,128 +147,67 @@ int pack_send(int fd, const char* buf, int len) {
 
 /**
  * @brief
- *
- * @param recv_fd
- * @param send_fd
- * @param pipe
- * @param server
- * @param ssb
- * @param src 0: front, 1: backend
+ * @return 0: ok, 1: need more data (continue), -1: error(break)
  */
-static void recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_t* server, ssbuffer_t* ssb, int src) {
+static int recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_t* server, ssbuffer_t* ssb,
+                         int is_pack) {
     char buffer[RECV_BUF_SIZE] = {0};
     // 读取客户端数据
     int rlen = 0;
     int rt = 0;
-    while (server->running) {
-        rlen = sstcp_receive(recv_fd, buffer, sizeof(buffer));
-        if (rlen <= 0) {
-            perror("recv failed");
-            break;
-        }
-        _LOG("Received: %d", rlen);
-
-        int is_pack = 0;
-        if ((pipe->conf->mode == SSPIPE_MODE_LOCAL && src == 0) || (pipe->conf->mode == SSPIPE_MODE_REMOTE && src == 1)) {
-            is_pack = 1;
-        }
-
-        if (is_pack) {
-            rt = pack_send(send_fd, buffer, rlen);
-            if (rt == -1) {
-                _LOG_E("pack_send error.");
-                break;
-            } else if (rt == 1) {
-                _LOG("need more data.");
-                continue;
-            }
-            _LOG("pack_send ok.");
-        } else {
-            rt = ssbuffer_grow(ssb, rlen);
-            if (rt != _OK) {
-                _LOG_E("ssbuffer_grow failed");
-                break;
-            }
-            memcpy(ssb->buf + ssb->len, buffer, rlen);
-            ssb->len += rlen;
-            rt = unpack_send(pipe, ssb, send_fd);
-            if (rt == -1) {
-                _LOG_E("unpack_send error.");
-                break;
-            } else if (rt == 1) {
-                _LOG("need more data.");
-                continue;
-            }
-            _LOG("unpack_send ok.");
-        }
-    }
-}
-
-#ifdef _WIN32
-static DWORD WINAPI backend_thread(LPVOID arg) {
-#else
-static void* backend_thread(void* arg) {
-#endif
-    sstcp_client_t* backend = (sstcp_client_t*)(((void**)arg)[0]);
-    sspipe_t* pipe = (sspipe_t*)(((void**)arg)[1]);
-    int front_fd = (intptr_t)(((void**)arg)[2]);
-    assert(front_fd >= 0);
-    assert(backend);
-    assert(pipe);
-    sstcp_server_t* server = (sstcp_server_t*)pipe->server;
-    assert(server);
-
-    ssbuffer_t* ssb = ssbuffer_create();
-    if (!ssb) {
-        perror("create ssbuffer failed");
-        sstcp_close(backend->client_fd);
-        sstcp_free_client(backend);
-        return 0;
-    }
-
-    recv_and_send(backend->client_fd, front_fd, pipe, server, ssb, 1);
-    _LOG("backend_thread exit.");
-
-    ssbuffer_free(ssb);
-    // sstcp_close(backend->client_fd);
-    // sstcp_free_client(backend);
-    free(arg);
-    return 0;
-}
-
-static int run_backend(sspipe_t* pipe, sstcp_client_t* backend, int front_fd) {
-    void** arg = (void**)malloc(3 * sizeof(void*));
-    arg[0] = (void*)backend;
-    arg[1] = (void*)pipe;
-    arg[2] = (void*)(intptr_t)front_fd;
-
-#ifdef _WIN32
-    HANDLE thread = CreateThread(NULL, 0, backend_thread, arg, 0, NULL);
-    if (thread == NULL) {
-        perror("Thread creation failed");
-        free(arg);
+    // while (server->running) {
+    rlen = sstcp_receive(recv_fd, buffer, sizeof(buffer));
+    if (rlen <= 0) {
+        perror("recv failed");
+        // break;
         return _ERR;
     }
-#else
-    pthread_t thread_id;
-    if (pthread_create(&thread_id, NULL, backend_thread, arg) != 0) {
-        perror("Thread creation failed");
-        free(arg);
-        return _ERR;
-    }
-    pthread_detach(thread_id);  // 分离线程，避免资源泄漏
-#endif
+    _LOG("Received: %d", rlen);
 
+    if (is_pack) {
+        rt = pack_send(send_fd, buffer, rlen);
+        if (rt == -1) {
+            _LOG_E("pack_send error.");
+            // break;
+            return _ERR;
+        } else if (rt == 1) {
+            _LOG("need more data.");
+            // continue;
+            return 1;
+        }
+        _LOG("pack_send ok.");
+    } else {
+        rt = ssbuffer_grow(ssb, rlen);
+        if (rt != _OK) {
+            _LOG_E("ssbuffer_grow failed");
+            // break;
+            return _ERR;
+        }
+        memcpy(ssb->buf + ssb->len, buffer, rlen);
+        ssb->len += rlen;
+        rt = unpack_send(pipe, ssb, send_fd);
+        if (rt == -1) {
+            _LOG_E("unpack_send error.");
+            // break;
+            return _ERR;
+        } else if (rt == 1) {
+            _LOG("need more data.");
+            // continue;
+            return 1;
+        }
+        _LOG("unpack_send ok.");
+    }
+    // }
     return _OK;
 }
 
-void handle_client(int front_fd, sstcp_server_t* server) {
+void handle_front(int front_fd, sstcp_server_t* server) {
     assert(front_fd >= 0);
     assert(server);
     sspipe_t* pipe = (sspipe_t*)server->user_data;
     assert(pipe);
 
-    _LOG("handle_client accept: %d", front_fd);
+    _LOG("handle_front accept: %d", front_fd);
     sstcp_client_t* backend = sstcp_create_client();
     if (!backend) {
         perror("create client failed");
@@ -311,7 +216,8 @@ void handle_client(int front_fd, sstcp_server_t* server) {
 
     int rt = sstcp_connect(backend, pipe->conf->target_ip, pipe->conf->target_port);
     if (rt != _OK) {
-        _LOG_E("connect to target failed. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
+        _LOG_E("connect to target failed. %d %s:%d", backend->client_fd, pipe->conf->target_ip,
+               pipe->conf->target_port);
         perror("connect to target failed");
         sstcp_free_client(backend);
         return;
@@ -319,32 +225,106 @@ void handle_client(int front_fd, sstcp_server_t* server) {
     _LOG("connect to target ok. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
 
     /* TODO: read timeout from config */
-    sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
-    sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
-    sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
-    sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
+    // sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
+    // sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
+    // sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
+    // sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
 
-    rt = run_backend(pipe, backend, front_fd);
-    if (rt != _OK) {
-        _LOG_E("run backend failed.");
+    ssbuffer_t* front_ssb = ssbuffer_create();
+    if (!front_ssb) {
+        perror("create front_ssb failed");
+        sstcp_close(backend->client_fd);
+        sstcp_free_client(backend);
+        return;
+    }
+    ssbuffer_t* backend_ssb = ssbuffer_create();
+    if (!backend_ssb) {
+        perror("create backend_ssb failed");
         sstcp_close(backend->client_fd);
         sstcp_free_client(backend);
         return;
     }
 
-    ssbuffer_t* ssb = ssbuffer_create();
-    if (!ssb) {
-        perror("create ssbuffer failed");
-        sstcp_close(backend->client_fd);
-        sstcp_free_client(backend);
-        return;
+    int is_pack = 0;
+    if (pipe->conf->mode == SSPIPE_MODE_LOCAL) {
+        is_pack = 1;
     }
-    recv_and_send(front_fd, backend->client_fd, pipe, server, ssb, 0);
 
-    ssbuffer_free(ssb);
+    char buffer[RECV_BUF_SIZE] = {0};
+    struct pollfd fds[2] = {{.fd = front_fd, .events = POLLIN}, {.fd = backend->client_fd, .events = POLLIN}};
+    while (pipe->server->running) {
+        rt = poll(fds, 2, RECV_TIMEOUT);
+        if (rt < 0) {
+            if (errno == EINTR || errno == EAGAIN) {
+                _LOG("poll pending. errno:%d", errno);
+                continue;
+            }
+            perror("poll failed");
+            break;
+        } else if (rt == 0) {
+            _LOG("poll timeout.");
+            continue;
+        }
+
+        for (int i = 0; i < 2; ++i) {
+            if (fds[i].revents & POLLIN) {
+                if (fds[i].fd == front_fd) {
+                    // read front data
+                    rt = recv_and_send(front_fd, backend->client_fd, pipe, server, front_ssb, is_pack);
+                    if (rt == _ERR) {
+                        _LOG_E("front recv_and_send error.");
+                        break;
+                    } else if (rt == 1) {
+                        _LOG("front need more data.");
+                        continue;
+                    }
+                } else {
+                    // read backend data
+                    rt = recv_and_send(backend->client_fd, front_fd, pipe, server, backend_ssb, !is_pack);
+                    if (rt == _ERR) {
+                        _LOG_E("backend recv_and_send error.");
+                        break;
+                    } else if (rt == 1) {
+                        _LOG("backend need more data.");
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // // read front data
+        // rt = recv_and_send(front_fd, backend->client_fd, pipe, server, front_ssb, is_pack);
+        // if (rt == _ERR) {
+        //     _LOG_E("front recv_and_send error.");
+        //     break;
+        // } else if (rt == 1) {
+        //     _LOG("front need more data.");
+        //     continue;
+        // }
+        // _LOG("front recv_and_send ok. front_ssb->len:%d", front_ssb->len);
+
+        // // read backend data
+        // while (pipe->server->running) {
+        //     rt = recv_and_send(backend->client_fd, front_fd, pipe, server, backend_ssb, !is_pack);
+        //     if (rt == _ERR) {
+        //         _LOG_E("backend recv_and_send error.");
+        //         break;
+        //     } else if (rt == 1) {
+        //         _LOG("backend need more data.");
+        //         continue;
+        //     }
+        //     _LOG("backend recv_and_send ok. backend_ssb->len:%d", backend_ssb->len);
+        //     break;
+        // }
+    }
+
+    /* TODO: */
+
+    ssbuffer_free(front_ssb);
+    ssbuffer_free(backend_ssb);
     sstcp_close(backend->client_fd);
     sstcp_free_client(backend);
-    _LOG("handle_client exit.");
+    _LOG("handle_front exit.");
 }
 
 /* ---------- api ----------- */
@@ -356,7 +336,7 @@ sspipe_t* sspipe_init(ssconfig_t* conf) {
     if (pipe == NULL) {
         return NULL;
     }
-    sstcp_server_t* server = sstcp_create_server(conf->listen_ip, conf->listen_port, handle_client, pipe);
+    sstcp_server_t* server = sstcp_create_server(conf->listen_ip, conf->listen_port, handle_front, pipe);
     if (!server) {
         _LOG_E("create tcp server error.");
         sspipe_free(pipe);
@@ -368,9 +348,17 @@ sspipe_t* sspipe_init(ssconfig_t* conf) {
     return pipe;
 }
 
+int sspipe_start(sspipe_t* pipe) {
+    if (!pipe) return _ERR;
+    sstcp_server_t* server = pipe->server;
+    if (!server) return _ERR;
+    return sstcp_start_server(server);
+}
+
 void sspipe_free(sspipe_t* pipe) {
     if (!pipe) return;
     if (pipe->server) {
+        if (pipe->server->running) sstcp_stop_server(pipe->server);
         sstcp_free_server(pipe->server);
         pipe->server = NULL;
     }
