@@ -11,9 +11,9 @@
 #include "sslog.h"
 
 #define PACKET_HEAD_LEN 4
-// #define MAX_PAYLOAD_LEN (1024 * 1)
-#define RECV_BUF_SIZE 1024 * 10
-// #define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN) * 2
+#define MAX_PAYLOAD_LEN (1024 * 2)
+// #define RECV_BUF_SIZE 1024 * 10
+#define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN)
 #define RECV_TIMEOUT 1000 * 60
 #define SEND_TIMEOUT 1000 * 60
 
@@ -83,7 +83,7 @@ rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd) {
     while (ssb->len > 0) {
         if (ssb->len < PACKET_HEAD_LEN) return RS_RET_MORE;
         payload_len = ntohl(*(uint32_t*)ssb->buf);
-        if (payload_len > 65536 || payload_len <= 0) { /* TODO: */
+        if (payload_len > MAX_PAYLOAD_LEN || payload_len <= 0) { /* TODO: */
             _LOG_E("payload_len:%d error. max_payload:%d", payload_len, 65536);
             return RS_RET_ERR;
         }
@@ -124,8 +124,8 @@ int pack_send(int fd, const char* buf, int len) {
         /* TODO: encrypt */
 
         // pack and send
-        // payload_len = remaining > MAX_PAYLOAD_LEN ? MAX_PAYLOAD_LEN : remaining;
-        payload_len = remaining;
+        payload_len = remaining > MAX_PAYLOAD_LEN ? MAX_PAYLOAD_LEN : remaining;
+        // payload_len = remaining;
         uint32_t payload_len_net = htonl(payload_len);
         rt = sstcp_send(fd, (char*)&payload_len_net, PACKET_HEAD_LEN);
         if (rt < 0) {
@@ -162,7 +162,7 @@ static int recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_
         _LOG("client closed.");
         return RS_RET_CLOSE;
     } else if (rlen < 0) {
-        perror("recv failed");
+        _LOG_W("recv failed");
         return RS_RET_ERR;
     }
     _LOG("Received: %d", rlen);
@@ -280,14 +280,14 @@ void handle_front(int front_fd, sstcp_server_t* server) {
                     rs = recv_and_send(backend->client_fd, front_fd, pipe, server, backend_ssb, !is_pack);
                 }
                 if (rs == RS_RET_CLOSE) {
-                    _LOG_E("recv_and_send close. fd:%d", fds[i].fd);
+                    _LOG("recv_and_send close. fd:%d", fds[i].fd);
                     is_stop = 1;
                     break;
                 } else if (rs == RS_RET_MORE) {
                     _LOG("need more data. fd:%d", fds[i].fd);
                     continue;
                 } else if (rs == RS_RET_ERR) {
-                    _LOG_E("recv_and_send error. fd:%d", fds[i].fd);
+                    _LOG_W("recv_and_send error. fd:%d", fds[i].fd);
                     is_stop = 1;
                     break;
                 }
