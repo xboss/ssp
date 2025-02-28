@@ -15,7 +15,7 @@
 #define RECV_BUF_SIZE 1024 * 10
 // #define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN) * 2
 #define RECV_TIMEOUT 1000 * 60
-// #define SEND_TIMEOUT 1000 * 60
+#define SEND_TIMEOUT 1000 * 60
 
 /////////////////////////
 
@@ -227,10 +227,10 @@ void handle_front(int front_fd, sstcp_server_t* server) {
     _LOG("connect to target ok. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
 
     /* TODO: read timeout from config */
-    // sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
-    // sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
-    // sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
-    // sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
+    sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
+    sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
+    sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
+    sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
 
     ssbuffer_t* front_ssb = ssbuffer_create();
     if (!front_ssb) {
@@ -244,6 +244,7 @@ void handle_front(int front_fd, sstcp_server_t* server) {
         perror("create backend_ssb failed");
         sstcp_close(backend->client_fd);
         sstcp_free_client(backend);
+        ssbuffer_free(front_ssb);
         return;
     }
 
@@ -292,34 +293,7 @@ void handle_front(int front_fd, sstcp_server_t* server) {
                 }
             }
         }
-
-        // // read front data
-        // rt = recv_and_send(front_fd, backend->client_fd, pipe, server, front_ssb, is_pack);
-        // if (rt == _ERR) {
-        //     _LOG_E("front recv_and_send error.");
-        //     break;
-        // } else if (rt == 1) {
-        //     _LOG("front need more data.");
-        //     continue;
-        // }
-        // _LOG("front recv_and_send ok. front_ssb->len:%d", front_ssb->len);
-
-        // // read backend data
-        // while (pipe->server->running) {
-        //     rt = recv_and_send(backend->client_fd, front_fd, pipe, server, backend_ssb, !is_pack);
-        //     if (rt == _ERR) {
-        //         _LOG_E("backend recv_and_send error.");
-        //         break;
-        //     } else if (rt == 1) {
-        //         _LOG("backend need more data.");
-        //         continue;
-        //     }
-        //     _LOG("backend recv_and_send ok. backend_ssb->len:%d", backend_ssb->len);
-        //     break;
-        // }
     }
-
-    /* TODO: */
 
     ssbuffer_free(front_ssb);
     ssbuffer_free(backend_ssb);
@@ -356,10 +330,15 @@ int sspipe_start(sspipe_t* pipe) {
     return sstcp_start_server(server);
 }
 
+void sspipe_stop(sspipe_t* pipe) {
+    if (!pipe || !pipe->server) return;
+    sstcp_stop_server(pipe->server);
+    _LOG("sspipe stop ok.");
+}
+
 void sspipe_free(sspipe_t* pipe) {
     if (!pipe) return;
     if (pipe->server) {
-        if (pipe->server->running) sstcp_stop_server(pipe->server);
         sstcp_free_server(pipe->server);
         pipe->server = NULL;
     }

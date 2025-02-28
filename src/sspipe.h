@@ -11,6 +11,7 @@ typedef struct {
 
 sspipe_t* sspipe_init(ssconfig_t* conf);
 int sspipe_start(sspipe_t* pipe);
+void sspipe_stop(sspipe_t* pipe);
 void sspipe_free(sspipe_t* pipe);
 
 #endif /* _SSPIPE_H */

@@ -111,6 +111,25 @@ static int check_config(ssconfig_t* conf) {
     return _OK;
 }
 
+
+static void handle_exit(int sig) {
+    _LOG("exit by signal %d ... ", sig);
+    sspipe_stop(g_pipe);
+}
+
+static void signal_handler(int sn) {
+    _LOG("signal_handler sig:%d", sn);
+    switch (sn) {
+        // case SIGQUIT:
+        case SIGINT:
+        // case SIGTERM:
+            handle_exit(sn);
+            break;
+        default:
+            break;
+    }
+}
+
 int main(int argc, char const* argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <config file>\n", argv[0]);
@@ -123,8 +142,8 @@ int main(int argc, char const* argv[]) {
     sslog_init(g_conf.log_file, g_conf.log_level);
     if (g_conf.log_file) free(g_conf.log_file);
 
-    // 忽略SIGPIPE信号
     signal(SIGPIPE, SIG_IGN);
+    signal(SIGINT, signal_handler);
 
     g_pipe = sspipe_init(&g_conf);
     if (!g_pipe) {
