@@ -5,7 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <sys/time.h>
+#endif
 #include <time.h>
 
 #define _OK 0
@@ -60,6 +62,9 @@ void sslog(sslog_level level, const char *fmt, ...) {
         return;
     }
     if (level < g_log->log_level) return;
+    #ifdef _WIN32
+    fprintf(g_log->fp, "%s ", level_desc[level]);
+    #else
     struct timeval tv;
     gettimeofday(&tv, NULL);
     time_t t = time(NULL);
@@ -67,6 +72,8 @@ void sslog(sslog_level level, const char *fmt, ...) {
     char buf[32];
     buf[strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", time)] = '\0';
     fprintf(g_log->fp, "%s.%ld %s ", buf, tv.tv_usec / 1000l, level_desc[level]);
+    #endif
+
     va_list ap;
     va_start(ap, fmt);
     vfprintf(g_log->fp, fmt, ap);
