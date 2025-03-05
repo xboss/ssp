@@ -1,28 +1,31 @@
-cmake_minimum_required(VERSION 3.20.0)
-project(ssp VERSION 0.1.0)
+cmake_minimum_required(VERSION 3.10)
+project(ssp)
+
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_WALL ON)
 
 
-#SET(CMAKE_C_FLAGS_DEBUG "$ENV{CXXFLAGS} -std=c89 -O0 -Wno-deprecated-declarations -DDEBUG -ggdb -fsanitize=address")
-SET(CMAKE_C_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -DDEBUG -g -ggdb ")
-SET(CMAKE_C_FLAGS_RELEASE "$ENV{CXXFLAGS} -std=c99 -O3 -Wall")
+# 添加源文件
+set(SOURCE_FILES
+src/crypto.c
+src/main.c
+src/ssconf.c
+src/sslog.c
+src/sspipe.c
+src/sstcp.c
+src/stream_buf.c
+)
 
-message("project dir: ${PROJECT_SOURCE_DIR} compiler: ${CMAKE_C_COMPILER_ID} platform: ${CMAKE_SYSTEM_NAME}")
-
-#link_directories("/usr/local/lib")
-
-include_directories(${PROJECT_SOURCE_DIR}/src/)
-
-aux_source_directory(${PROJECT_SOURCE_DIR}/src DIR_SRCS)
 
 ############# ssp #############
-add_executable(ssp ${DIR_SRCS})
+add_executable(ssp ${SOURCE_FILES})
 target_link_libraries(ssp ssl)
 target_link_libraries(ssp crypto)
 target_link_libraries(ssp pthread)
 
 
 ############# static #############
-# add_executable(ssp_static ${DIR_SRCS})
+# add_executable(ssp_static ${SOURCE_FILES})
 # target_link_libraries(ssp_static ssl -static)
 # target_link_libraries(ssp_static crypto -static)
 

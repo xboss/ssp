@@ -57,7 +57,7 @@ static int load_conf(const char* conf_file, ssconfig_t* conf) {
         } else if (strcmp("target_port", keys[i]) == 0) {
             conf->target_port = (unsigned short)atoi(v);
         } else if (strcmp("password", keys[i]) == 0) {
-            pwd2key(conf->key, CIPHER_KEY_LEN, v, strlen(v));
+            memcpy(conf->key, v, strnlen(v, AES_128_KEY_SIZE));
         }
         // else if (strcmp("timeout", keys[i]) == 0) {
         //     conf->timeout = atoi(v);
@@ -111,7 +111,6 @@ static int check_config(ssconfig_t* conf) {
     return _OK;
 }
 
-
 static void handle_exit(int sig) {
     _LOG("exit by signal %d ... ", sig);
     sspipe_stop(g_pipe);
@@ -122,7 +121,7 @@ static void signal_handler(int sn) {
     switch (sn) {
         // case SIGQUIT:
         case SIGINT:
-        // case SIGTERM:
+            // case SIGTERM:
             handle_exit(sn);
             break;
         default:
@@ -141,6 +140,7 @@ int main(int argc, char const* argv[]) {
     if (check_config(&g_conf) != 0) return 1;
     sslog_init(g_conf.log_file, g_conf.log_level);
     if (g_conf.log_file) free(g_conf.log_file);
+    strcpy((char*)g_conf.iv, "bewatermyfriend.");
 
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, signal_handler);

@@ -23,13 +23,13 @@ static void *client_thread(void *arg) {
     assert(server);
     assert(server->handler);
     assert(client_socket >= 0);
+    free(arg);
 
     // 调用客户端处理函数
     server->handler(client_socket, server);
 
     // 关闭客户端套接字
     sstcp_close(client_socket);
-    free(arg);  // 释放动态分配的内存
     _LOG("client_thread exit.");
     return 0;
 }
