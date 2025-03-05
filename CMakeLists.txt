@@ -13,7 +13,8 @@ src/ssconf.c
 src/sslog.c
 src/sspipe.c
 src/sstcp.c
-src/stream_buf.c
+src/ssbuff.c
+# src/test_conf.c
 )
 
 
