@@ -14,6 +14,18 @@
 #define SSPIPE_MODE_LOCAL 0
 #define SSPIPE_MODE_REMOTE 1
 
+#ifndef _TIMECOST
+#define _TIMECOST(_TAG)            \
+    do {                           \
+        timecost = mstime() - now; \
+        if (timecost > 0)          \
+            _LOG(                  \
+                "timecost "_TAG    \
+                " %ld",            \
+                mstime() - now);   \
+    } while (0);
+#endif
+
 typedef struct {
     char listen_ip[INET_ADDRSTRLEN];
     unsigned short listen_port;

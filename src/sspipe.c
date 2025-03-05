@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include "sslog.h"
 
@@ -64,7 +66,18 @@ static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
 
 /////////////////////////
 
+static uint64_t now = 0;
+static uint64_t timecost = 0;
+
+
 typedef enum { RS_RET_ERR = -1, RS_RET_OK, RS_RET_CLOSE, RS_RET_MORE } rs_ret;
+
+inline static uint64_t mstime() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t millisecond = (tv.tv_sec * 1000000l + tv.tv_usec) / 1000l;
+    return millisecond;
+}
 
 static inline int send_totally(int fd, const char* buf, int len) {
     int sent = 0, s = len;
@@ -241,7 +254,9 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
         return;
     }
 
+    now = mstime();
     int rt = sstcp_connect(backend, pipe->conf->target_ip, pipe->conf->target_port);
+    _TIMECOST("connect to target")
     if (rt != _OK) {
         _LOG_E("connect to target failed. %d %s:%d", backend->client_fd, pipe->conf->target_ip,
                pipe->conf->target_port);
@@ -296,12 +311,15 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
             continue;
         }
 
+        now = mstime();
         infd = (fds[0].revents & POLLIN) ? front_fd : backend->client_fd;
         outfd = infd == backend->client_fd ? front_fd : backend->client_fd;
         if (infd == front_fd) {
             rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, is_pack);
+            _TIMECOST("recv_and_send pack");
         } else {
             rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, !is_pack);
+            _TIMECOST("recv_and_send unpack");
         }
         if (rs == RS_RET_CLOSE) {
             _LOG("recv_and_send close.");
