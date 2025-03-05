@@ -298,12 +298,14 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
     rs_ret rs = RS_RET_OK;
     struct pollfd fds[2] = {{.fd = front_fd, .events = POLLIN}, {.fd = backend->client_fd, .events = POLLIN}};
     while (pipe->server->running) {
+        _LOG("poll wait start.");
         rt = poll(fds, 2, POLL_TIMEOUT);
+        _LOG("poll wait end. rt:%d", rt);
         if (rt < 0) {
-            if (errno == EINTR || errno == EAGAIN) {
-                _LOG("poll pending. errno:%d", errno);
-                continue;
-            }
+            // if (errno == EINTR || errno == EAGAIN) {
+            //     _LOG("poll pending. errno:%d", errno);
+            //     continue;
+            // }
             perror("poll failed");
             break;
         } else if (rt == 0) {
