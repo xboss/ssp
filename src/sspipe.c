@@ -187,7 +187,7 @@ static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_serv
         _LOG("client closed.");
         return RS_RET_CLOSE;
     } else if (rlen < 0) {
-        _LOG_W("recv failed");
+        perror("recv failed");
         return RS_RET_ERR;
     }
     _LOG("Received: %d", rlen);
@@ -278,10 +278,11 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
         is_pack = 1;
     }
 
-    int is_stop = 0;
+    int infd = 0, outfd = 0;
+    // int is_stop = 0;
     rs_ret rs = RS_RET_OK;
     struct pollfd fds[2] = {{.fd = front_fd, .events = POLLIN}, {.fd = backend->client_fd, .events = POLLIN}};
-    while (pipe->server->running && !is_stop) {
+    while (pipe->server->running) {
         rt = poll(fds, 2, POLL_TIMEOUT);
         if (rt < 0) {
             if (errno == EINTR || errno == EAGAIN) {
@@ -295,29 +296,48 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
             continue;
         }
 
-        for (int i = 0; i < 2; ++i) {
-            if (fds[i].revents & POLLIN) {
-                if (fds[i].fd == front_fd) {
-                    // read front data
-                    rs = recv_and_send(front_fd, backend->client_fd, pipe, server, front_ssb, is_pack);
-                } else {
-                    // read backend data
-                    rs = recv_and_send(backend->client_fd, front_fd, pipe, server, backend_ssb, !is_pack);
-                }
-                if (rs == RS_RET_CLOSE) {
-                    _LOG("recv_and_send close. fd:%d", fds[i].fd);
-                    is_stop = 1;
-                    break;
-                } else if (rs == RS_RET_MORE) {
-                    _LOG("need more data. fd:%d", fds[i].fd);
-                    continue;
-                } else if (rs == RS_RET_ERR) {
-                    _LOG_W("recv_and_send error. fd:%d", fds[i].fd);
-                    is_stop = 1;
-                    break;
-                }
-            }
+        infd = (fds[0].revents & POLLIN) ? front_fd : backend->client_fd;
+        outfd = infd == backend->client_fd ? front_fd : backend->client_fd;
+        if (infd != front_fd) {
+            is_pack = !is_pack;
         }
+        rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, is_pack);
+        if (rs == RS_RET_CLOSE) {
+            _LOG("recv_and_send close.");
+            // is_stop = 1;
+            break;
+        } else if (rs == RS_RET_MORE) {
+            _LOG("need more data.");
+            continue;
+        } else if (rs == RS_RET_ERR) {
+            _LOG_W("recv_and_send error.");
+            // is_stop = 1;
+            break;
+        }
+
+        // for (int i = 0; i < 2; ++i) {
+        //     if (fds[i].revents & POLLIN) {
+        //         if (fds[i].fd == front_fd) {
+        //             // read front data
+        //             rs = recv_and_send(front_fd, backend->client_fd, pipe, server, front_ssb, is_pack);
+        //         } else {
+        //             // read backend data
+        //             rs = recv_and_send(backend->client_fd, front_fd, pipe, server, backend_ssb, !is_pack);
+        //         }
+        //         if (rs == RS_RET_CLOSE) {
+        //             _LOG("recv_and_send close. fd:%d", fds[i].fd);
+        //             is_stop = 1;
+        //             break;
+        //         } else if (rs == RS_RET_MORE) {
+        //             _LOG("need more data. fd:%d", fds[i].fd);
+        //             continue;
+        //         } else if (rs == RS_RET_ERR) {
+        //             _LOG_W("recv_and_send error. fd:%d", fds[i].fd);
+        //             is_stop = 1;
+        //             break;
+        //         }
+        //     }
+        // }
     }
 
     ssbuffer_free(front_ssb);

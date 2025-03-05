@@ -8,13 +8,13 @@ set(CMAKE_C_WALL ON)
 # 添加源文件
 set(SOURCE_FILES
 src/crypto.c
-# src/main.c
+src/main.c
 src/ssconf.c
 src/sslog.c
 src/sspipe.c
 src/sstcp.c
 src/ssbuff.c
-src/test_proxy.c
+# src/test_proxy.c
 )
 
 
