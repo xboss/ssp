@@ -7,15 +7,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "cipher.h"
 #include "sslog.h"
 
 #define PACKET_HEAD_LEN 4
 #define MAX_PAYLOAD_LEN (1024 * 2)
-// #define RECV_BUF_SIZE 1024 * 10
-#define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN)
-#define RECV_TIMEOUT 1000 * 60
-#define SEND_TIMEOUT 1000 * 60
+#define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN) * 5
+// #define RECV_TIMEOUT 1000 * 60
+// #define SEND_TIMEOUT 1000 * 60
+#define POLL_TIMEOUT 1000 * 10
 
 /////////////////////////
 
@@ -67,19 +66,35 @@ static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
 
 typedef enum { RS_RET_ERR = -1, RS_RET_OK, RS_RET_CLOSE, RS_RET_MORE } rs_ret;
 
+static inline int send_totally(int fd, const char* buf, int len) {
+    int sent = 0, s = len;
+    while (sent < len) {
+        s = sstcp_send(fd, buf + sent, s - sent);
+        if (s < 0) {
+            return RS_RET_ERR;
+        }
+        sent += s;
+    }
+    assert(sent == len);
+    return RS_RET_OK;
+}
+
 /**
  * @brief
  * @param ssb
  * @param client
  * @return 0: ok, 1: need more data (continue), -1: error(break)
  */
-rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd) {
+static rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd, char* cipher_buf, unsigned char* key,
+                          unsigned char* iv) {
     assert(ssb);
     assert(pipe);
     assert(fd >= 0);
-    int rt = 0;
+    assert(cipher_buf);
+
     uint32_t payload_len = 0;
     int remaining = 0;
+    size_t cipher_len = 0;
     while (ssb->len > 0) {
         if (ssb->len < PACKET_HEAD_LEN) return RS_RET_MORE;
         payload_len = ntohl(*(uint32_t*)ssb->buf);
@@ -89,15 +104,25 @@ rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd) {
         }
         if (ssb->len < payload_len + PACKET_HEAD_LEN) return RS_RET_MORE;
 
-        /* TODO: decrypt */
-
-        rt = sstcp_send(fd, ssb->buf + PACKET_HEAD_LEN, payload_len);
-        if (rt < 0) {
-            perror("unpack_send to target failed");
-            return RS_RET_ERR;
+        // decrypt
+        if (key && strlen((const char*)key) > 0 && iv && strlen((const char*)iv) > 0) {
+            if (crypto_decrypt(key, iv, (const unsigned char*)ssb->buf + PACKET_HEAD_LEN, payload_len,
+                               (unsigned char*)cipher_buf, &cipher_len) != 0) {
+                _LOG_E("unpack_send crypto_decrypt failed");
+                return RS_RET_ERR;
+            }
+            _LOG("unpack_send crypto_decrypt ok.");
+            if (send_totally(fd, cipher_buf, cipher_len) != RS_RET_OK) {
+                _LOG_E("unpack_send to target failed");
+                return RS_RET_ERR;
+            }
+        } else {
+            if (send_totally(fd, ssb->buf + PACKET_HEAD_LEN, payload_len) != RS_RET_OK) {
+                _LOG_E("unpack_send to target failed");
+                return RS_RET_ERR;
+            }
         }
         _LOG("unpack_send to target ok.");
-
         remaining = ssb->len - (payload_len + PACKET_HEAD_LEN);
         assert(remaining >= 0);
         if (remaining > 0) {
@@ -108,52 +133,52 @@ rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd) {
     return RS_RET_OK;
 }
 
-/**
- * @brief
- * @return 0: ok, 1: need more data (continue), -1: error(break)
- */
-int pack_send(int fd, const char* buf, int len) {
+static rs_ret pack_send(int fd, const char* buf, int len, char* cipher_buf, unsigned char* key, unsigned char* iv) {
     assert(fd >= 0);
     assert(buf);
     assert(len > 0);
+    assert(cipher_buf);
 
-    int rt = 0;
     uint32_t payload_len = 0;
     int remaining = len;
+    size_t cipher_len = 0;
     while (remaining > 0) {
-        /* TODO: encrypt */
-
         // pack and send
         payload_len = remaining > MAX_PAYLOAD_LEN ? MAX_PAYLOAD_LEN : remaining;
-        // payload_len = remaining;
         uint32_t payload_len_net = htonl(payload_len);
-        rt = sstcp_send(fd, (char*)&payload_len_net, PACKET_HEAD_LEN);
-        if (rt < 0) {
-            _LOG_E("pack_send to target failed");
+        if (send_totally(fd, (char*)&payload_len_net, PACKET_HEAD_LEN) != RS_RET_OK) {
+            _LOG_E("pack_send header to target failed");
             return RS_RET_ERR;
         }
-        assert(rt == PACKET_HEAD_LEN);
-        rt = sstcp_send(fd, buf + (len - remaining), payload_len);
-        if (rt < 0) {
-            _LOG_E("pack_send to target failed");
-            return RS_RET_ERR;
+        // encrypt
+        if (key && strlen((const char*)key) > 0 && iv && strlen((const char*)iv) > 0) {
+            if (crypto_encrypt(key, iv, (const unsigned char*)buf + (len - remaining), payload_len,
+                               (unsigned char*)cipher_buf, &cipher_len) != 0) {
+                _LOG_E("pack_send crypto_encrypt failed");
+                return RS_RET_ERR;
+            }
+            _LOG("pack_send crypto_encrypt ok.");
+            if (send_totally(fd, cipher_buf, cipher_len) != RS_RET_OK) {
+                _LOG_E("pack_send to target failed");
+                return RS_RET_ERR;
+            }
+        } else {
+            if (send_totally(fd, buf + (len - remaining), payload_len) != RS_RET_OK) {
+                _LOG_E("pack_send to target failed");
+                return RS_RET_ERR;
+            }
         }
-        _LOG("pack_send to target ok. rt:%d payload_len:%d", rt, payload_len);
-        // assert(rt == payload_len);
-
-        remaining = remaining - rt;
+        _LOG("pack_send to target ok. payload_len:%d", payload_len);
+        remaining = remaining - payload_len;
         assert(remaining >= 0);
     }
     return RS_RET_OK;
 }
 
-/**
- * @brief
- * @return 0: ok, 1: need more data (continue), -1: error(break)
- */
-static int recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_t* server, ssbuffer_t* ssb,
-                         int is_pack) {
+static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_t* server, ssbuffer_t* ssb,
+                            int is_pack) {
     char buffer[RECV_BUF_SIZE] = {0};
+    char cipher_buf[MAX_PAYLOAD_LEN + AES_BLOCK_SIZE] = {0};
     // 读取客户端数据
     int rlen = 0;
     int rt = 0;
@@ -168,12 +193,12 @@ static int recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_
     _LOG("Received: %d", rlen);
 
     if (is_pack) {
-        rt = pack_send(send_fd, buffer, rlen);
-        if (rt == -1) {
+        rt = pack_send(send_fd, buffer, rlen, cipher_buf, pipe->conf->key, pipe->conf->iv);
+        if (rt == RS_RET_ERR) {
             _LOG_E("pack_send error.");
             // break;
             return RS_RET_ERR;
-        } else if (rt == 1) {
+        } else if (rt == RS_RET_MORE) {
             _LOG("need more data.");
             // continue;
             return RS_RET_MORE;
@@ -188,12 +213,12 @@ static int recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_
         }
         memcpy(ssb->buf + ssb->len, buffer, rlen);
         ssb->len += rlen;
-        rt = unpack_send(pipe, ssb, send_fd);
-        if (rt == -1) {
+        rt = unpack_send(pipe, ssb, send_fd, cipher_buf, pipe->conf->key, pipe->conf->iv);
+        if (rt == RS_RET_ERR) {
             _LOG_E("unpack_send error.");
             // break;
             return RS_RET_ERR;
-        } else if (rt == 1) {
+        } else if (rt == RS_RET_MORE) {
             _LOG("need more data.");
             // continue;
             return RS_RET_MORE;
@@ -226,11 +251,11 @@ void handle_front(int front_fd, sstcp_server_t* server) {
     }
     _LOG("connect to target ok. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
 
-    /* TODO: read timeout from config */
-    sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
-    sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
-    sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
-    sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
+    // /* TODO: read timeout from config */
+    // sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
+    // sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
+    // sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
+    // sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
 
     ssbuffer_t* front_ssb = ssbuffer_create();
     if (!front_ssb) {
@@ -257,7 +282,7 @@ void handle_front(int front_fd, sstcp_server_t* server) {
     rs_ret rs = RS_RET_OK;
     struct pollfd fds[2] = {{.fd = front_fd, .events = POLLIN}, {.fd = backend->client_fd, .events = POLLIN}};
     while (pipe->server->running && !is_stop) {
-        rt = poll(fds, 2, RECV_TIMEOUT);
+        rt = poll(fds, 2, POLL_TIMEOUT);
         if (rt < 0) {
             if (errno == EINTR || errno == EAGAIN) {
                 _LOG("poll pending. errno:%d", errno);

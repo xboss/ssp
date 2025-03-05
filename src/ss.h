@@ -1,7 +1,7 @@
 #ifndef _SS_H
 #define _SS_H
 
-#include "cipher.h"
+#include "crypto.h"
 #include "sslog.h"
 
 #if !defined(INET_ADDRSTRLEN)
@@ -19,7 +19,8 @@ typedef struct {
     unsigned short listen_port;
     char target_ip[INET_ADDRSTRLEN];
     unsigned short target_port;
-    char key[CIPHER_KEY_LEN + 1];
+    unsigned char key[AES_128_KEY_SIZE + 1];
+    unsigned char iv[AES_BLOCK_SIZE + 1];
     int mode;
     int send_timeout;  // 发送超时时间（毫秒）
     int recv_timeout;  // 接收超时时间（毫秒）
