@@ -99,7 +99,7 @@ static rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd, char* cipher_
         if (ssb->len < PACKET_HEAD_LEN) return RS_RET_MORE;
         payload_len = ntohl(*(uint32_t*)ssb->buf);
         if (payload_len > MAX_PAYLOAD_LEN || payload_len <= 0) { /* TODO: */
-            _LOG_E("payload_len:%d error. max_payload:%d", payload_len, 65536);
+            _LOG_E("payload_len:%d error. max_payload:%d", payload_len, MAX_PAYLOAD_LEN);
             return RS_RET_ERR;
         }
         if (ssb->len < payload_len + PACKET_HEAD_LEN) return RS_RET_MORE;
