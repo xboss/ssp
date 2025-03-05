@@ -228,7 +228,7 @@ static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_serv
     return RS_RET_OK;
 }
 
-void handle_front(int front_fd, sstcp_server_t* server) {
+static void handle_front(int front_fd, sstcp_server_t* server) {
     assert(front_fd >= 0);
     assert(server);
     sspipe_t* pipe = (sspipe_t*)server->user_data;
