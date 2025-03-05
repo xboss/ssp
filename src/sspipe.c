@@ -298,10 +298,11 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
 
         infd = (fds[0].revents & POLLIN) ? front_fd : backend->client_fd;
         outfd = infd == backend->client_fd ? front_fd : backend->client_fd;
-        if (infd != front_fd) {
-            is_pack = !is_pack;
+        if (infd == front_fd) {
+            rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, is_pack);
+        } else {
+            rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, !is_pack);
         }
-        rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, is_pack);
         if (rs == RS_RET_CLOSE) {
             _LOG("recv_and_send close.");
             // is_stop = 1;
