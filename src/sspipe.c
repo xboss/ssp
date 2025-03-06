@@ -83,6 +83,7 @@ static int send_auth_req(sspipe_t* pipe, int fd) {
     return _OK;
 }
 
+/* TODO: Attack by maintaining connection */
 static int do_auth(sspipe_t* pipe, int fd) {
     char buf[PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE] = {0};
     char pkt_buf[PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE] = {0};
