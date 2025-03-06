@@ -88,6 +88,7 @@ static int do_auth(sspipe_t* pipe, int fd) {
     char buf[PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE] = {0};
     char pkt_buf[PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE] = {0};
     int pkt_len = 0, r = 0;
+    int payload_len = 0;
     while (pkt_len < PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE) {
         r = sstcp_receive(fd, buf, PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE - pkt_len);
         if (r <= 0) {
@@ -98,6 +99,14 @@ static int do_auth(sspipe_t* pipe, int fd) {
         // print_hex("recv", (const unsigned char*)buf, r);
         memcpy(pkt_buf + pkt_len, buf, r);
         pkt_len += r;
+        // double check
+        if (pkt_len >= PACKET_HEAD_LEN) {
+            payload_len = ntohl(*(uint32_t*)pkt_buf);
+            if (payload_len != SSPIPE_TICKET_SIZE) {
+                _LOG_W("auth failed. payload_len: %d", payload_len);
+                return _ERR;
+            }
+        }
     }
     assert(pkt_len == PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE);
     if (strlen((const char*)pipe->conf->key) > 0 && strlen((const char*)pipe->conf->iv) > 0) {
