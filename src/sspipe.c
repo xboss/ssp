@@ -100,6 +100,10 @@ static int do_auth(sspipe_t* pipe, int fd) {
         memcpy(pkt_buf + pkt_len, buf, r);
         pkt_len += r;
         // double check
+        if (pkt_len < PACKET_HEAD_LEN) {
+            _LOG_W("auth failed. head_len: %d", pkt_len);
+            return _ERR;
+        }
         if (pkt_len >= PACKET_HEAD_LEN) {
             payload_len = ntohl(*(uint32_t*)pkt_buf);
             if (payload_len != SSPIPE_TICKET_SIZE) {
