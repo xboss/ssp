@@ -91,12 +91,6 @@ static inline int send_totally(int fd, const char* buf, int len) {
     return RS_RET_OK;
 }
 
-/**
- * @brief
- * @param ssb
- * @param client
- * @return 0: ok, 1: need more data (continue), -1: error(break)
- */
 static rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd, char* cipher_buf, unsigned char* key,
                           unsigned char* iv) {
     assert(ssb);
@@ -295,7 +289,6 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
     }
 
     int infd = 0, outfd = 0;
-    // int is_stop = 0;
     rs_ret rs = RS_RET_OK;
     struct pollfd fds[2] = {{.fd = front_fd, .events = POLLIN}, {.fd = backend->client_fd, .events = POLLIN}};
     while (pipe->server->running) {
@@ -326,40 +319,14 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
         }
         if (rs == RS_RET_CLOSE) {
             _LOG("recv_and_send close.");
-            // is_stop = 1;
             break;
         } else if (rs == RS_RET_MORE) {
             _LOG("need more data.");
             continue;
         } else if (rs == RS_RET_ERR) {
             _LOG_W("recv_and_send error.");
-            // is_stop = 1;
             break;
         }
-
-        // for (int i = 0; i < 2; ++i) {
-        //     if (fds[i].revents & POLLIN) {
-        //         if (fds[i].fd == front_fd) {
-        //             // read front data
-        //             rs = recv_and_send(front_fd, backend->client_fd, pipe, server, front_ssb, is_pack);
-        //         } else {
-        //             // read backend data
-        //             rs = recv_and_send(backend->client_fd, front_fd, pipe, server, backend_ssb, !is_pack);
-        //         }
-        //         if (rs == RS_RET_CLOSE) {
-        //             _LOG("recv_and_send close. fd:%d", fds[i].fd);
-        //             is_stop = 1;
-        //             break;
-        //         } else if (rs == RS_RET_MORE) {
-        //             _LOG("need more data. fd:%d", fds[i].fd);
-        //             continue;
-        //         } else if (rs == RS_RET_ERR) {
-        //             _LOG_W("recv_and_send error. fd:%d", fds[i].fd);
-        //             is_stop = 1;
-        //             break;
-        //         }
-        //     }
-        // }
     }
 
     ssbuffer_free(front_ssb);
