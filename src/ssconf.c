@@ -85,17 +85,18 @@ inline static char *trim(char *str) {
 inline static int parse_line(ssconf_t *conf, char *line, int rows) {
     char *eqp = strchr(line, '=');
     if (eqp == NULL) {
-        fprintf(stderr, "line:%d format error. must be in the format of 'key=value'\n", rows + 1);
+        fprintf(stderr, "config file line:%d format error. must be in the format of 'key=value'\n", rows + 1);
         return _ERR;
     }
     int key_len = eqp - line;
     if (key_len > conf->max_key_size) {
-        fprintf(stderr, "line:%d 'key' is too long. must be less than %d\n", rows + 1, conf->max_key_size);
+        fprintf(stderr, "config file line:%d 'key' is too long. must be less than %d\n", rows + 1, conf->max_key_size);
         return _ERR;
     }
     int value_len = line + strlen(line) - eqp;
     if (value_len > conf->max_value_size) {
-        fprintf(stderr, "line:%d 'value' is too long. must be less than %d\n", rows + 1, conf->max_value_size);
+        fprintf(stderr, "config file line:%d 'value' is too long. must be less than %d\n", rows + 1,
+                conf->max_value_size);
         return _ERR;
     }
 
@@ -136,13 +137,13 @@ int ssconf_load(ssconf_t *conf, const char *file) {
     char *p = NULL;
     for (; fgets(line, conf->max_line_size, fp) != NULL; rows++) {
         if (rows > conf->max_rows) {
-            fprintf(stderr, "too many lines in file:%s, must be less than %d\n", file, conf->max_rows);
+            fprintf(stderr, "too many lines in config file:%s, must be less than %d\n", file, conf->max_rows);
             ret = _ERR;
             break;
         }
 
         if (line[conf->max_line_size] != '\0') {
-            fprintf(stderr, "line:%d is too long. must be less than %d\n", rows + 1, conf->max_line_size);
+            fprintf(stderr, "config file line:%d is too long. must be less than %d\n", rows + 1, conf->max_line_size);
             ret = _ERR;
             break;
         }
@@ -150,7 +151,7 @@ int ssconf_load(ssconf_t *conf, const char *file) {
         p = trim(line);
         if (p == NULL || strlen(p) == 0) continue;
         if (p[0] == '=' || p[strlen(p) - 1] == '=') {
-            fprintf(stderr, "line:%d format error. must be in the format of 'key=value'\n", rows + 1);
+            fprintf(stderr, "config file line:%d format error. must be in the format of 'key=value'\n", rows + 1);
             ret = _ERR;
             break;
         }

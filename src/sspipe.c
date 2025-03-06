@@ -15,8 +15,8 @@
 #define PACKET_HEAD_LEN 4
 #define MAX_PAYLOAD_LEN (1024 * 2)
 #define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN) * 5
-// #define RECV_TIMEOUT 1000 * 60
-// #define SEND_TIMEOUT 1000 * 60
+#define RECV_TIMEOUT 1000 * 60 * 5
+#define SEND_TIMEOUT 1000 * 60 * 5
 #define POLL_TIMEOUT 1000 * 10
 
 // static uint64_t now = 0;
@@ -31,13 +31,13 @@ inline static uint64_t mstime() {
     return millisecond;
 }
 
-// static void print_hex(const char* label, const unsigned char* data, int len) {
-//     printf("%s: ", label);
-//     for (int i = 0; i < len; i++) {
-//         printf("%02x ", data[i]);
-//     }
-//     printf("\n");
-// }
+static void print_hex(const char* label, const unsigned char* data, int len) {
+    printf("%s: ", label);
+    for (int i = 0; i < len; i++) {
+        printf("%02x ", data[i]);
+    }
+    printf("\n");
+}
 
 static inline int send_totally(int fd, const char* buf, int len) {
     int sent = 0, s = len;
@@ -49,9 +49,76 @@ static inline int send_totally(int fd, const char* buf, int len) {
         sent += s;
     }
     assert(sent == len);
-    // printf("send_fd: %d ", fd);
-    // print_hex("send:", (const unsigned char*)buf, len);
+    // printf("<<< send_fd: %d ", fd);
+    // print_hex("send", (const unsigned char*)buf, len);
     return RS_RET_OK;
+}
+
+// format: [len(4B)][ticket(32B)]
+static int send_auth_req(sspipe_t* pipe, int fd) {
+    char pkt_buf[PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE] = {0};
+    int pkt_len = 0;
+    int payload_len = SSPIPE_TICKET_SIZE;
+    uint32_t payload_len_net = htonl(payload_len);
+    memcpy(pkt_buf, &payload_len_net, PACKET_HEAD_LEN);
+    pkt_len += PACKET_HEAD_LEN;
+    int cipher_len = 0;
+    if (strlen((const char*)pipe->conf->key) > 0 && strlen((const char*)pipe->conf->iv) > 0) {
+        if (crypto_encrypt(pipe->conf->key, pipe->conf->iv, (const unsigned char*)pipe->conf->ticket,
+                           SSPIPE_TICKET_SIZE, (unsigned char*)pkt_buf + PACKET_HEAD_LEN, (size_t*)&cipher_len)) {
+            _LOG_E("crypto encrypt failed when send_auth_req");
+            return _ERR;
+        }
+        pkt_len += cipher_len;
+    } else {
+        memcpy(pkt_buf + PACKET_HEAD_LEN, pipe->conf->ticket, SSPIPE_TICKET_SIZE);
+        pkt_len += SSPIPE_TICKET_SIZE;
+    }
+    assert(pkt_len == PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE);
+    if (send_totally(fd, pkt_buf, pkt_len)) {
+        _LOG_E("send auth req failed");
+        return _ERR;
+    }
+    _LOG("send auth req ok.");
+    return _OK;
+}
+
+static int do_auth(sspipe_t* pipe, int fd) {
+    char buf[PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE] = {0};
+    char pkt_buf[PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE] = {0};
+    int pkt_len = 0, r = 0;
+    while (pkt_len < PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE) {
+        r = sstcp_receive(fd, buf, PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE - pkt_len);
+        if (r <= 0) {
+            _LOG_W("auth failed");
+            return _ERR;
+        }
+        // printf(">>> recv_fd: %d ", fd);
+        // print_hex("recv", (const unsigned char*)buf, r);
+        memcpy(pkt_buf + pkt_len, buf, r);
+        pkt_len += r;
+    }
+    assert(pkt_len == PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE);
+    if (strlen((const char*)pipe->conf->key) > 0 && strlen((const char*)pipe->conf->iv) > 0) {
+        int cipher_len = 0;
+        if (crypto_decrypt(pipe->conf->key, pipe->conf->iv, (const unsigned char*)pkt_buf + PACKET_HEAD_LEN,
+                           SSPIPE_TICKET_SIZE, (unsigned char*)buf, (size_t*)&cipher_len)) {
+            _LOG_E("crypto decrypt failed when do_auth");
+            return _ERR;
+        }
+        assert(cipher_len == SSPIPE_TICKET_SIZE);
+        if (memcmp(buf, pipe->conf->ticket, SSPIPE_TICKET_SIZE) != 0) {
+            _LOG_W("auth failed");
+            return _ERR;
+        }
+    } else {
+        if (memcmp(pkt_buf + PACKET_HEAD_LEN, pipe->conf->ticket, SSPIPE_TICKET_SIZE) != 0) {
+            _LOG_W("auth failed");
+            return _ERR;
+        }
+    }
+    _LOG("auth success");
+    return _OK;
 }
 
 static rs_ret unpack_send(sspipe_t* pipe, ssbuff_t* ssb, int fd, char* pkt_buf, unsigned char* key, unsigned char* iv) {
@@ -217,14 +284,31 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
     }
     _LOG("connect to target ok. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
     sstcp_set_nodelay(backend->client_fd);
+    _LOG("front_fd: %d backend_fd: %d", front_fd, backend->client_fd);
 
-    printf("front_fd: %d backend_fd: %d", front_fd, backend->client_fd);
+    /* TODO: read timeout from config */
+    sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
+    sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
+    sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
+    sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
 
-    // /* TODO: read timeout from config */
-    // sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
-    // sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
-    // sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
-    // sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
+    int is_pack = 0;
+    if (pipe->conf->mode == SSPIPE_MODE_LOCAL) {
+        is_pack = 1;
+        // send auth request
+        if (send_auth_req(pipe, backend->client_fd) != _OK) {
+            close(backend->client_fd);
+            sstcp_free_client(backend);
+            return;
+        }
+    }
+    if (pipe->conf->mode == SSPIPE_MODE_REMOTE) {
+        if (do_auth(pipe, front_fd) != _OK) {
+            close(backend->client_fd);
+            sstcp_free_client(backend);
+            return;
+        }
+    }
 
     ssbuff_t* front_ssb = ssbuff_init(RECV_BUF_SIZE);
     if (!front_ssb) {
@@ -240,11 +324,6 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
         sstcp_free_client(backend);
         ssbuff_free(front_ssb);
         return;
-    }
-
-    int is_pack = 0;
-    if (pipe->conf->mode == SSPIPE_MODE_LOCAL) {
-        is_pack = 1;
     }
 
     char recv_buf[RECV_BUF_SIZE] = {0};
