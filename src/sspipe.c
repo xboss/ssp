@@ -9,6 +9,7 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "ssbuff.h"
 #include "sslog.h"
 
 #define PACKET_HEAD_LEN 4
@@ -18,56 +19,8 @@
 // #define SEND_TIMEOUT 1000 * 60
 #define POLL_TIMEOUT 1000 * 10
 
-/////////////////////////
-
-typedef struct {
-    char* buf;  // 动态缓冲区
-    int len;    // 当前缓冲长度
-    int cap;    // 缓冲区容量
-} ssbuffer_t;
-
-static ssbuffer_t* ssbuffer_create() {
-    ssbuffer_t* ssb = (ssbuffer_t*)calloc(1, sizeof(ssbuffer_t));
-    if (!ssb) {
-        return NULL;
-    }
-    return ssb;
-}
-
-static void ssbuffer_free(ssbuffer_t* ssb) {
-    if (ssb) {
-        if (ssb->buf) {
-            free(ssb->buf);
-            ssb->buf = NULL;
-        }
-        free(ssb);
-    }
-}
-
-static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
-    if (ssb->len + len > ssb->cap) {
-        int new_cap = ssb->cap * 3 / 2;
-        if (new_cap < ssb->len + len) {
-            new_cap = ssb->len + len;
-        }
-        char* new_buf = (char*)calloc(1, new_cap);
-        if (!new_buf) {
-            return _ERR;
-        }
-        if (ssb->buf) {
-            memcpy(new_buf, ssb->buf, ssb->len);
-            free(ssb->buf);
-        }
-        ssb->buf = new_buf;
-        ssb->cap = new_cap;
-    }
-    return _OK;
-}
-
-/////////////////////////
-
-static uint64_t now = 0;
-static uint64_t timecost = 0;
+// static uint64_t now = 0;
+// static uint64_t timecost = 0;
 
 typedef enum { RS_RET_ERR = -1, RS_RET_OK, RS_RET_CLOSE, RS_RET_MORE } rs_ret;
 
@@ -91,7 +44,7 @@ static inline int send_totally(int fd, const char* buf, int len) {
     return RS_RET_OK;
 }
 
-static rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd, char* cipher_buf, unsigned char* key,
+static rs_ret unpack_send(sspipe_t* pipe, ssbuff_t* ssb, int fd, char* cipher_buf, unsigned char* key,
                           unsigned char* iv) {
     assert(ssb);
     assert(pipe);
@@ -181,7 +134,7 @@ static rs_ret pack_send(int fd, const char* buf, int len, char* cipher_buf, unsi
     return RS_RET_OK;
 }
 
-static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_t* server, ssbuffer_t* ssb,
+static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_t* server, ssbuff_t* ssb,
                             int is_pack) {
     char buffer[RECV_BUF_SIZE] = {0};
     char cipher_buf[MAX_PAYLOAD_LEN + AES_BLOCK_SIZE] = {0};
@@ -202,31 +155,24 @@ static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_serv
         rt = pack_send(send_fd, buffer, rlen, cipher_buf, pipe->conf->key, pipe->conf->iv);
         if (rt == RS_RET_ERR) {
             _LOG_E("pack_send error.");
-            // break;
             return RS_RET_ERR;
         } else if (rt == RS_RET_MORE) {
             _LOG("need more data.");
-            // continue;
             return RS_RET_MORE;
         }
         _LOG("pack_send ok.");
     } else {
-        rt = ssbuffer_grow(ssb, rlen);
-        if (rt != _OK) {
-            _LOG_E("ssbuffer_grow failed");
-            // break;
+        if (ssbuff_append(ssb, buffer, rlen)) {
+            _LOG_E("ssbuff_append failed");
             return RS_RET_ERR;
         }
-        memcpy(ssb->buf + ssb->len, buffer, rlen);
-        ssb->len += rlen;
+
         rt = unpack_send(pipe, ssb, send_fd, cipher_buf, pipe->conf->key, pipe->conf->iv);
         if (rt == RS_RET_ERR) {
             _LOG_E("unpack_send error.");
-            // break;
             return RS_RET_ERR;
         } else if (rt == RS_RET_MORE) {
             _LOG("need more data.");
-            // continue;
             return RS_RET_MORE;
         }
         _LOG("unpack_send ok.");
@@ -248,9 +194,7 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
         return;
     }
 
-    now = mstime();
     int rt = sstcp_connect(backend, pipe->conf->target_ip, pipe->conf->target_port);
-    _TIMECOST("connect to target")
     if (rt != _OK) {
         _LOG_E("connect to target failed. %d %s:%d", backend->client_fd, pipe->conf->target_ip,
                pipe->conf->target_port);
@@ -267,19 +211,19 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
     // sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
     // sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
 
-    ssbuffer_t* front_ssb = ssbuffer_create();
+    ssbuff_t* front_ssb = ssbuff_init(RECV_BUF_SIZE);
     if (!front_ssb) {
         perror("create front_ssb failed");
         sstcp_close(backend->client_fd);
         sstcp_free_client(backend);
         return;
     }
-    ssbuffer_t* backend_ssb = ssbuffer_create();
+    ssbuff_t* backend_ssb = ssbuff_init(RECV_BUF_SIZE);
     if (!backend_ssb) {
         perror("create backend_ssb failed");
         sstcp_close(backend->client_fd);
         sstcp_free_client(backend);
-        ssbuffer_free(front_ssb);
+        ssbuff_free(front_ssb);
         return;
     }
 
@@ -307,15 +251,12 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
             continue;
         }
 
-        now = mstime();
         infd = (fds[0].revents & POLLIN) ? front_fd : backend->client_fd;
         outfd = infd == backend->client_fd ? front_fd : backend->client_fd;
         if (infd == front_fd) {
             rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, is_pack);
-            _TIMECOST("recv_and_send pack");
         } else {
             rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, !is_pack);
-            _TIMECOST("recv_and_send unpack");
         }
         if (rs == RS_RET_CLOSE) {
             _LOG("recv_and_send close.");
@@ -329,8 +270,8 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
         }
     }
 
-    ssbuffer_free(front_ssb);
-    ssbuffer_free(backend_ssb);
+    ssbuff_free(front_ssb);
+    ssbuff_free(backend_ssb);
     sstcp_close(backend->client_fd);
     sstcp_free_client(backend);
     _LOG("handle_front exit.");

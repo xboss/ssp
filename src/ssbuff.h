@@ -11,6 +11,6 @@ ssbuff_t* ssbuff_init(int cap);
 void ssbuff_free(ssbuff_t* ssb);
 int ssbuff_grow(ssbuff_t* ssb, int len);
 int ssbuff_append(ssbuff_t* ssb, const char* data, int len);
-int ssbuff_move(ssbuff_t* ssb, int offset, int len);
+// int ssbuff_move(ssbuff_t* ssb, int offset, int len);
 
 #endif /* _SSBUFF_H */

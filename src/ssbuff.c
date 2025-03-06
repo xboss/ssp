@@ -51,7 +51,7 @@ int ssbuff_grow(ssbuff_t* ssb, int len) {
     return _OK;
 }
 
-int ssbuff_append(ssbuff_t* ssb, const char* data, int len){
+int ssbuff_append(ssbuff_t* ssb, const char* data, int len) {
     if (ssbuff_grow(ssb, len) == _ERR) {
         return _ERR;
     }
@@ -60,11 +60,11 @@ int ssbuff_append(ssbuff_t* ssb, const char* data, int len){
     return _OK;
 }
 
-int ssbuff_move(ssbuff_t* ssb, int offset, int len) {
-    if (offset <= 0 || len <= 0 || offset + len > ssb->len) {
-        return _ERR;
-    }
-    memmove(ssb->buf, ssb->buf + offset, len);
-    ssb->len = len;
-    return _OK;
-}
+// int ssbuff_move(ssbuff_t* ssb, int offset, int len) {
+//     if (offset <= 0 || len <= 0 || offset + len > ssb->len) {
+//         return _ERR;
+//     }
+//     memmove(ssb->buf, ssb->buf + offset, len);
+//     ssb->len = len;
+//     return _OK;
+// }
