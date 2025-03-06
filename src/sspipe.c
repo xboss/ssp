@@ -341,7 +341,7 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
     }
 
     char recv_buf[RECV_BUF_SIZE] = {0};
-    char pkt_buf[MAX_PAYLOAD_LEN + AES_BLOCK_SIZE + PACKET_HEAD_LEN] = {0}; /* TODO: -AES_BLOCK_SIZE */
+    char pkt_buf[MAX_PAYLOAD_LEN + PACKET_HEAD_LEN] = {0};
     int infd = 0, outfd = 0;
     rs_ret rs = RS_RET_OK;
     struct pollfd fds[2] = {{.fd = front_fd, .events = POLLIN}, {.fd = backend->client_fd, .events = POLLIN}};
