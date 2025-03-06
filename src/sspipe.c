@@ -69,7 +69,6 @@ static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
 static uint64_t now = 0;
 static uint64_t timecost = 0;
 
-
 typedef enum { RS_RET_ERR = -1, RS_RET_OK, RS_RET_CLOSE, RS_RET_MORE } rs_ret;
 
 inline static uint64_t mstime() {
@@ -246,6 +245,7 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
     assert(server);
     sspipe_t* pipe = (sspipe_t*)server->user_data;
     assert(pipe);
+    sstcp_set_nodelay(front_fd);
 
     _LOG("handle_front accept: %d", front_fd);
     sstcp_client_t* backend = sstcp_create_client();
@@ -265,6 +265,7 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
         return;
     }
     _LOG("connect to target ok. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
+    sstcp_set_nodelay(backend->client_fd);
 
     // /* TODO: read timeout from config */
     // sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);

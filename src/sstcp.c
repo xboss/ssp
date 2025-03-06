@@ -1,6 +1,7 @@
 #include "sstcp.h"
 
 #include <assert.h>
+#include <netinet/tcp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -264,6 +265,15 @@ int sstcp_set_recv_timeout(int fd, int timeout_ms) {
 
     if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)) < 0) {
         perror("Failed to set receive timeout");
+        return _ERR;
+    }
+    return _OK;
+}
+
+int sstcp_set_nodelay(int fd) {
+    int opt = 1;
+    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&opt, sizeof(opt)) < 0) {
+        perror("Failed to set TCP_NODELAY");
         return _ERR;
     }
     return _OK;

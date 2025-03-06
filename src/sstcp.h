@@ -80,6 +80,9 @@ int sstcp_set_send_timeout(int fd, int timeout_ms);
 // 设置接收超时时间
 int sstcp_set_recv_timeout(int fd, int timeout_ms);
 
+// 设置 TCP_NODELAY 选项
+int sstcp_set_nodelay(int fd);
+
 // 关闭连接
 void sstcp_close(int fd);
 
