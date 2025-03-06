@@ -9,65 +9,18 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "ssbuff.h"
 #include "sslog.h"
 
 #define PACKET_HEAD_LEN 4
 #define MAX_PAYLOAD_LEN (1024 * 2)
 #define RECV_BUF_SIZE (MAX_PAYLOAD_LEN + PACKET_HEAD_LEN) * 5
-// #define RECV_TIMEOUT 1000 * 60
-// #define SEND_TIMEOUT 1000 * 60
+#define RECV_TIMEOUT 1000 * 60 * 5
+#define SEND_TIMEOUT 1000 * 60 * 5
 #define POLL_TIMEOUT 1000 * 10
 
-/////////////////////////
-
-typedef struct {
-    char* buf;  // 动态缓冲区
-    int len;    // 当前缓冲长度
-    int cap;    // 缓冲区容量
-} ssbuffer_t;
-
-static ssbuffer_t* ssbuffer_create() {
-    ssbuffer_t* ssb = (ssbuffer_t*)calloc(1, sizeof(ssbuffer_t));
-    if (!ssb) {
-        return NULL;
-    }
-    return ssb;
-}
-
-static void ssbuffer_free(ssbuffer_t* ssb) {
-    if (ssb) {
-        if (ssb->buf) {
-            free(ssb->buf);
-            ssb->buf = NULL;
-        }
-        free(ssb);
-    }
-}
-
-static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
-    if (ssb->len + len > ssb->cap) {
-        int new_cap = ssb->cap * 3 / 2;
-        if (new_cap < ssb->len + len) {
-            new_cap = ssb->len + len;
-        }
-        char* new_buf = (char*)calloc(1, new_cap);
-        if (!new_buf) {
-            return _ERR;
-        }
-        if (ssb->buf) {
-            memcpy(new_buf, ssb->buf, ssb->len);
-            free(ssb->buf);
-        }
-        ssb->buf = new_buf;
-        ssb->cap = new_cap;
-    }
-    return _OK;
-}
-
-/////////////////////////
-
-static uint64_t now = 0;
-static uint64_t timecost = 0;
+// static uint64_t now = 0;
+// static uint64_t timecost = 0;
 
 typedef enum { RS_RET_ERR = -1, RS_RET_OK, RS_RET_CLOSE, RS_RET_MORE } rs_ret;
 
@@ -76,6 +29,14 @@ inline static uint64_t mstime() {
     gettimeofday(&tv, NULL);
     uint64_t millisecond = (tv.tv_sec * 1000000l + tv.tv_usec) / 1000l;
     return millisecond;
+}
+
+static void print_hex(const char* label, const unsigned char* data, int len) {
+    printf("%s: ", label);
+    for (int i = 0; i < len; i++) {
+        printf("%02x ", data[i]);
+    }
+    printf("\n");
 }
 
 static inline int send_totally(int fd, const char* buf, int len) {
@@ -88,19 +49,89 @@ static inline int send_totally(int fd, const char* buf, int len) {
         sent += s;
     }
     assert(sent == len);
+    // printf("<<< send_fd: %d ", fd);
+    // print_hex("send", (const unsigned char*)buf, len);
     return RS_RET_OK;
 }
 
-static rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd, char* cipher_buf, unsigned char* key,
-                          unsigned char* iv) {
+// format: [len(4B)][ticket(32B)]
+static int send_auth_req(sspipe_t* pipe, int fd) {
+    char pkt_buf[PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE] = {0};
+    int pkt_len = 0;
+    int payload_len = SSPIPE_TICKET_SIZE;
+    uint32_t payload_len_net = htonl(payload_len);
+    memcpy(pkt_buf, &payload_len_net, PACKET_HEAD_LEN);
+    pkt_len += PACKET_HEAD_LEN;
+    int cipher_len = 0;
+    if (strlen((const char*)pipe->conf->key) > 0 && strlen((const char*)pipe->conf->iv) > 0) {
+        if (crypto_encrypt(pipe->conf->key, pipe->conf->iv, (const unsigned char*)pipe->conf->ticket,
+                           SSPIPE_TICKET_SIZE, (unsigned char*)pkt_buf + PACKET_HEAD_LEN, (size_t*)&cipher_len)) {
+            _LOG_E("crypto encrypt failed when send_auth_req");
+            return _ERR;
+        }
+        pkt_len += cipher_len;
+    } else {
+        memcpy(pkt_buf + PACKET_HEAD_LEN, pipe->conf->ticket, SSPIPE_TICKET_SIZE);
+        pkt_len += SSPIPE_TICKET_SIZE;
+    }
+    assert(pkt_len == PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE);
+    if (send_totally(fd, pkt_buf, pkt_len)) {
+        _LOG_E("send auth req failed");
+        return _ERR;
+    }
+    _LOG("send auth req ok.");
+    return _OK;
+}
+
+/* TODO: Attack by maintaining connection */
+static int do_auth(sspipe_t* pipe, int fd) {
+    char buf[PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE] = {0};
+    char pkt_buf[PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE] = {0};
+    int pkt_len = 0, r = 0;
+    while (pkt_len < PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE) {
+        r = sstcp_receive(fd, buf, PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE - pkt_len);
+        if (r <= 0) {
+            _LOG_W("auth failed");
+            return _ERR;
+        }
+        // printf(">>> recv_fd: %d ", fd);
+        // print_hex("recv", (const unsigned char*)buf, r);
+        memcpy(pkt_buf + pkt_len, buf, r);
+        pkt_len += r;
+    }
+    assert(pkt_len == PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE);
+    if (strlen((const char*)pipe->conf->key) > 0 && strlen((const char*)pipe->conf->iv) > 0) {
+        int cipher_len = 0;
+        if (crypto_decrypt(pipe->conf->key, pipe->conf->iv, (const unsigned char*)pkt_buf + PACKET_HEAD_LEN,
+                           SSPIPE_TICKET_SIZE, (unsigned char*)buf, (size_t*)&cipher_len)) {
+            _LOG_E("crypto decrypt failed when do_auth");
+            return _ERR;
+        }
+        assert(cipher_len == SSPIPE_TICKET_SIZE);
+        if (memcmp(buf, pipe->conf->ticket, SSPIPE_TICKET_SIZE) != 0) {
+            _LOG_W("auth failed");
+            return _ERR;
+        }
+    } else {
+        if (memcmp(pkt_buf + PACKET_HEAD_LEN, pipe->conf->ticket, SSPIPE_TICKET_SIZE) != 0) {
+            _LOG_W("auth failed");
+            return _ERR;
+        }
+    }
+    _LOG("auth success");
+    return _OK;
+}
+
+static rs_ret unpack_send(sspipe_t* pipe, ssbuff_t* ssb, int fd, char* pkt_buf, unsigned char* key, unsigned char* iv) {
     assert(ssb);
     assert(pipe);
     assert(fd >= 0);
-    assert(cipher_buf);
+    assert(pkt_buf);
 
     uint32_t payload_len = 0;
     int remaining = 0;
     size_t cipher_len = 0;
+    int pkt_len = 0;
     while (ssb->len > 0) {
         if (ssb->len < PACKET_HEAD_LEN) return RS_RET_MORE;
         payload_len = ntohl(*(uint32_t*)ssb->buf);
@@ -113,21 +144,23 @@ static rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd, char* cipher_
         // decrypt
         if (key && strlen((const char*)key) > 0 && iv && strlen((const char*)iv) > 0) {
             if (crypto_decrypt(key, iv, (const unsigned char*)ssb->buf + PACKET_HEAD_LEN, payload_len,
-                               (unsigned char*)cipher_buf, &cipher_len) != 0) {
+                               (unsigned char*)pkt_buf, &cipher_len) != 0) {
                 _LOG_E("unpack_send crypto_decrypt failed");
                 return RS_RET_ERR;
             }
             _LOG("unpack_send crypto_decrypt ok.");
-            if (send_totally(fd, cipher_buf, cipher_len) != RS_RET_OK) {
-                _LOG_E("unpack_send to target failed");
-                return RS_RET_ERR;
-            }
+            assert(cipher_len == payload_len);
+            pkt_len += cipher_len;
         } else {
-            if (send_totally(fd, ssb->buf + PACKET_HEAD_LEN, payload_len) != RS_RET_OK) {
-                _LOG_E("unpack_send to target failed");
-                return RS_RET_ERR;
-            }
+            memcpy(pkt_buf, ssb->buf + PACKET_HEAD_LEN, payload_len);
+            pkt_len += payload_len;
         }
+        if (send_totally(fd, pkt_buf, pkt_len) != RS_RET_OK) {
+            _LOG_E("unpack_send to target failed");
+            return RS_RET_ERR;
+        }
+        assert(pkt_len == payload_len);
+        pkt_len = 0;
         _LOG("unpack_send to target ok.");
         remaining = ssb->len - (payload_len + PACKET_HEAD_LEN);
         assert(remaining >= 0);
@@ -139,56 +172,55 @@ static rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd, char* cipher_
     return RS_RET_OK;
 }
 
-static rs_ret pack_send(int fd, const char* buf, int len, char* cipher_buf, unsigned char* key, unsigned char* iv) {
+static rs_ret pack_send(int fd, const char* recv_buf, int recv_len, char* pkt_buf, unsigned char* key,
+                        unsigned char* iv) {
     assert(fd >= 0);
-    assert(buf);
-    assert(len > 0);
-    assert(cipher_buf);
+    assert(recv_buf);
+    assert(recv_len > 0);
+    assert(pkt_buf);
 
     uint32_t payload_len = 0;
-    int remaining = len;
+    int remaining = recv_len;
     size_t cipher_len = 0;
+    int pkt_len = 0;
     while (remaining > 0) {
         // pack and send
         payload_len = remaining > MAX_PAYLOAD_LEN ? MAX_PAYLOAD_LEN : remaining;
         uint32_t payload_len_net = htonl(payload_len);
-        if (send_totally(fd, (char*)&payload_len_net, PACKET_HEAD_LEN) != RS_RET_OK) {
-            _LOG_E("pack_send header to target failed");
-            return RS_RET_ERR;
-        }
+        memcpy(pkt_buf, &payload_len_net, PACKET_HEAD_LEN);
+        pkt_len += PACKET_HEAD_LEN;
         // encrypt
         if (key && strlen((const char*)key) > 0 && iv && strlen((const char*)iv) > 0) {
-            if (crypto_encrypt(key, iv, (const unsigned char*)buf + (len - remaining), payload_len,
-                               (unsigned char*)cipher_buf, &cipher_len) != 0) {
+            if (crypto_encrypt(key, iv, (const unsigned char*)recv_buf + (recv_len - remaining), payload_len,
+                               (unsigned char*)pkt_buf + PACKET_HEAD_LEN, &cipher_len) != 0) {
                 _LOG_E("pack_send crypto_encrypt failed");
                 return RS_RET_ERR;
             }
             _LOG("pack_send crypto_encrypt ok.");
-            if (send_totally(fd, cipher_buf, cipher_len) != RS_RET_OK) {
-                _LOG_E("pack_send to target failed");
-                return RS_RET_ERR;
-            }
+            assert(cipher_len == payload_len);
+            pkt_len += cipher_len;
         } else {
-            if (send_totally(fd, buf + (len - remaining), payload_len) != RS_RET_OK) {
-                _LOG_E("pack_send to target failed");
-                return RS_RET_ERR;
-            }
+            memcpy(pkt_buf + PACKET_HEAD_LEN, recv_buf + (recv_len - remaining), payload_len);
+            pkt_len += payload_len;
         }
+        if (send_totally(fd, pkt_buf, pkt_len) != RS_RET_OK) {
+            _LOG_E("pack_send to target failed");
+            return RS_RET_ERR;
+        }
+        pkt_len = 0;
         _LOG("pack_send to target ok. payload_len:%d", payload_len);
-        remaining = remaining - payload_len;
+        remaining -= payload_len;
         assert(remaining >= 0);
     }
     return RS_RET_OK;
 }
 
-static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_server_t* server, ssbuffer_t* ssb,
+static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, char* recv_buf, char* pkt_buf, ssbuff_t* ssb,
                             int is_pack) {
-    char buffer[RECV_BUF_SIZE] = {0};
-    char cipher_buf[MAX_PAYLOAD_LEN + AES_BLOCK_SIZE] = {0};
     // 读取客户端数据
     int rlen = 0;
     int rt = 0;
-    rlen = sstcp_receive(recv_fd, buffer, sizeof(buffer));
+    rlen = sstcp_receive(recv_fd, recv_buf, RECV_BUF_SIZE);
     if (rlen == 0) {
         _LOG("client closed.");
         return RS_RET_CLOSE;
@@ -197,36 +229,31 @@ static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_serv
         return RS_RET_ERR;
     }
     _LOG("Received: %d", rlen);
+    // printf("recv_fd: %d ", recv_fd);
+    // print_hex("recv:", (const unsigned char*)recv_buf, rlen);
 
     if (is_pack) {
-        rt = pack_send(send_fd, buffer, rlen, cipher_buf, pipe->conf->key, pipe->conf->iv);
+        rt = pack_send(send_fd, recv_buf, rlen, pkt_buf, pipe->conf->key, pipe->conf->iv);
         if (rt == RS_RET_ERR) {
             _LOG_E("pack_send error.");
-            // break;
             return RS_RET_ERR;
         } else if (rt == RS_RET_MORE) {
             _LOG("need more data.");
-            // continue;
             return RS_RET_MORE;
         }
         _LOG("pack_send ok.");
     } else {
-        rt = ssbuffer_grow(ssb, rlen);
-        if (rt != _OK) {
-            _LOG_E("ssbuffer_grow failed");
-            // break;
+        if (ssbuff_append(ssb, recv_buf, rlen)) {
+            _LOG_E("ssbuff_append failed");
             return RS_RET_ERR;
         }
-        memcpy(ssb->buf + ssb->len, buffer, rlen);
-        ssb->len += rlen;
-        rt = unpack_send(pipe, ssb, send_fd, cipher_buf, pipe->conf->key, pipe->conf->iv);
+
+        rt = unpack_send(pipe, ssb, send_fd, pkt_buf, pipe->conf->key, pipe->conf->iv);
         if (rt == RS_RET_ERR) {
             _LOG_E("unpack_send error.");
-            // break;
             return RS_RET_ERR;
         } else if (rt == RS_RET_MORE) {
             _LOG("need more data.");
-            // continue;
             return RS_RET_MORE;
         }
         _LOG("unpack_send ok.");
@@ -248,9 +275,7 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
         return;
     }
 
-    now = mstime();
     int rt = sstcp_connect(backend, pipe->conf->target_ip, pipe->conf->target_port);
-    _TIMECOST("connect to target")
     if (rt != _OK) {
         _LOG_E("connect to target failed. %d %s:%d", backend->client_fd, pipe->conf->target_ip,
                pipe->conf->target_port);
@@ -260,34 +285,50 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
     }
     _LOG("connect to target ok. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
     sstcp_set_nodelay(backend->client_fd);
+    _LOG("front_fd: %d backend_fd: %d", front_fd, backend->client_fd);
 
-    // /* TODO: read timeout from config */
-    // sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
-    // sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
-    // sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
-    // sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
+    /* TODO: read timeout from config */
+    sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
+    sstcp_set_recv_timeout(backend->client_fd, RECV_TIMEOUT);
+    sstcp_set_send_timeout(front_fd, SEND_TIMEOUT);
+    sstcp_set_send_timeout(backend->client_fd, SEND_TIMEOUT);
 
-    ssbuffer_t* front_ssb = ssbuffer_create();
+    int is_pack = 0;
+    if (pipe->conf->mode == SSPIPE_MODE_LOCAL) {
+        is_pack = 1;
+        // send auth request
+        if (send_auth_req(pipe, backend->client_fd) != _OK) {
+            close(backend->client_fd);
+            sstcp_free_client(backend);
+            return;
+        }
+    }
+    if (pipe->conf->mode == SSPIPE_MODE_REMOTE) {
+        if (do_auth(pipe, front_fd) != _OK) {
+            close(backend->client_fd);
+            sstcp_free_client(backend);
+            return;
+        }
+    }
+
+    ssbuff_t* front_ssb = ssbuff_init(RECV_BUF_SIZE);
     if (!front_ssb) {
         perror("create front_ssb failed");
         sstcp_close(backend->client_fd);
         sstcp_free_client(backend);
         return;
     }
-    ssbuffer_t* backend_ssb = ssbuffer_create();
+    ssbuff_t* backend_ssb = ssbuff_init(RECV_BUF_SIZE);
     if (!backend_ssb) {
         perror("create backend_ssb failed");
         sstcp_close(backend->client_fd);
         sstcp_free_client(backend);
-        ssbuffer_free(front_ssb);
+        ssbuff_free(front_ssb);
         return;
     }
 
-    int is_pack = 0;
-    if (pipe->conf->mode == SSPIPE_MODE_LOCAL) {
-        is_pack = 1;
-    }
-
+    char recv_buf[RECV_BUF_SIZE] = {0};
+    char pkt_buf[MAX_PAYLOAD_LEN + AES_BLOCK_SIZE + PACKET_HEAD_LEN] = {0}; /* TODO: -AES_BLOCK_SIZE */
     int infd = 0, outfd = 0;
     rs_ret rs = RS_RET_OK;
     struct pollfd fds[2] = {{.fd = front_fd, .events = POLLIN}, {.fd = backend->client_fd, .events = POLLIN}};
@@ -307,15 +348,12 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
             continue;
         }
 
-        now = mstime();
         infd = (fds[0].revents & POLLIN) ? front_fd : backend->client_fd;
         outfd = infd == backend->client_fd ? front_fd : backend->client_fd;
         if (infd == front_fd) {
-            rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, is_pack);
-            _TIMECOST("recv_and_send pack");
+            rs = recv_and_send(infd, outfd, pipe, recv_buf, pkt_buf, backend_ssb, is_pack);
         } else {
-            rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, !is_pack);
-            _TIMECOST("recv_and_send unpack");
+            rs = recv_and_send(infd, outfd, pipe, recv_buf, pkt_buf, backend_ssb, !is_pack);
         }
         if (rs == RS_RET_CLOSE) {
             _LOG("recv_and_send close.");
@@ -329,8 +367,8 @@ static void handle_front(int front_fd, sstcp_server_t* server) {
         }
     }
 
-    ssbuffer_free(front_ssb);
-    ssbuffer_free(backend_ssb);
+    ssbuff_free(front_ssb);
+    ssbuff_free(backend_ssb);
     sstcp_close(backend->client_fd);
     sstcp_free_client(backend);
     _LOG("handle_front exit.");
