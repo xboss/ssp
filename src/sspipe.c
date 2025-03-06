@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include "sslog.h"
 
@@ -64,7 +66,17 @@ static int ssbuffer_grow(ssbuffer_t* ssb, int len) {
 
 /////////////////////////
 
+static uint64_t now = 0;
+static uint64_t timecost = 0;
+
 typedef enum { RS_RET_ERR = -1, RS_RET_OK, RS_RET_CLOSE, RS_RET_MORE } rs_ret;
+
+inline static uint64_t mstime() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t millisecond = (tv.tv_sec * 1000000l + tv.tv_usec) / 1000l;
+    return millisecond;
+}
 
 static inline int send_totally(int fd, const char* buf, int len) {
     int sent = 0, s = len;
@@ -79,12 +91,6 @@ static inline int send_totally(int fd, const char* buf, int len) {
     return RS_RET_OK;
 }
 
-/**
- * @brief
- * @param ssb
- * @param client
- * @return 0: ok, 1: need more data (continue), -1: error(break)
- */
 static rs_ret unpack_send(sspipe_t* pipe, ssbuffer_t* ssb, int fd, char* cipher_buf, unsigned char* key,
                           unsigned char* iv) {
     assert(ssb);
@@ -187,7 +193,7 @@ static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_serv
         _LOG("client closed.");
         return RS_RET_CLOSE;
     } else if (rlen < 0) {
-        _LOG_W("recv failed");
+        perror("recv failed");
         return RS_RET_ERR;
     }
     _LOG("Received: %d", rlen);
@@ -228,11 +234,12 @@ static rs_ret recv_and_send(int recv_fd, int send_fd, sspipe_t* pipe, sstcp_serv
     return RS_RET_OK;
 }
 
-void handle_front(int front_fd, sstcp_server_t* server) {
+static void handle_front(int front_fd, sstcp_server_t* server) {
     assert(front_fd >= 0);
     assert(server);
     sspipe_t* pipe = (sspipe_t*)server->user_data;
     assert(pipe);
+    sstcp_set_nodelay(front_fd);
 
     _LOG("handle_front accept: %d", front_fd);
     sstcp_client_t* backend = sstcp_create_client();
@@ -241,7 +248,9 @@ void handle_front(int front_fd, sstcp_server_t* server) {
         return;
     }
 
+    now = mstime();
     int rt = sstcp_connect(backend, pipe->conf->target_ip, pipe->conf->target_port);
+    _TIMECOST("connect to target")
     if (rt != _OK) {
         _LOG_E("connect to target failed. %d %s:%d", backend->client_fd, pipe->conf->target_ip,
                pipe->conf->target_port);
@@ -250,6 +259,7 @@ void handle_front(int front_fd, sstcp_server_t* server) {
         return;
     }
     _LOG("connect to target ok. %d %s:%d", backend->client_fd, pipe->conf->target_ip, pipe->conf->target_port);
+    sstcp_set_nodelay(backend->client_fd);
 
     // /* TODO: read timeout from config */
     // sstcp_set_recv_timeout(front_fd, RECV_TIMEOUT);
@@ -278,16 +288,18 @@ void handle_front(int front_fd, sstcp_server_t* server) {
         is_pack = 1;
     }
 
-    int is_stop = 0;
+    int infd = 0, outfd = 0;
     rs_ret rs = RS_RET_OK;
     struct pollfd fds[2] = {{.fd = front_fd, .events = POLLIN}, {.fd = backend->client_fd, .events = POLLIN}};
-    while (pipe->server->running && !is_stop) {
+    while (pipe->server->running) {
+        _LOG("poll wait start.");
         rt = poll(fds, 2, POLL_TIMEOUT);
+        _LOG("poll wait end. rt:%d", rt);
         if (rt < 0) {
-            if (errno == EINTR || errno == EAGAIN) {
-                _LOG("poll pending. errno:%d", errno);
-                continue;
-            }
+            // if (errno == EINTR || errno == EAGAIN) {
+            //     _LOG("poll pending. errno:%d", errno);
+            //     continue;
+            // }
             perror("poll failed");
             break;
         } else if (rt == 0) {
@@ -295,28 +307,25 @@ void handle_front(int front_fd, sstcp_server_t* server) {
             continue;
         }
 
-        for (int i = 0; i < 2; ++i) {
-            if (fds[i].revents & POLLIN) {
-                if (fds[i].fd == front_fd) {
-                    // read front data
-                    rs = recv_and_send(front_fd, backend->client_fd, pipe, server, front_ssb, is_pack);
-                } else {
-                    // read backend data
-                    rs = recv_and_send(backend->client_fd, front_fd, pipe, server, backend_ssb, !is_pack);
-                }
-                if (rs == RS_RET_CLOSE) {
-                    _LOG("recv_and_send close. fd:%d", fds[i].fd);
-                    is_stop = 1;
-                    break;
-                } else if (rs == RS_RET_MORE) {
-                    _LOG("need more data. fd:%d", fds[i].fd);
-                    continue;
-                } else if (rs == RS_RET_ERR) {
-                    _LOG_W("recv_and_send error. fd:%d", fds[i].fd);
-                    is_stop = 1;
-                    break;
-                }
-            }
+        now = mstime();
+        infd = (fds[0].revents & POLLIN) ? front_fd : backend->client_fd;
+        outfd = infd == backend->client_fd ? front_fd : backend->client_fd;
+        if (infd == front_fd) {
+            rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, is_pack);
+            _TIMECOST("recv_and_send pack");
+        } else {
+            rs = recv_and_send(infd, outfd, pipe, server, backend_ssb, !is_pack);
+            _TIMECOST("recv_and_send unpack");
+        }
+        if (rs == RS_RET_CLOSE) {
+            _LOG("recv_and_send close.");
+            break;
+        } else if (rs == RS_RET_MORE) {
+            _LOG("need more data.");
+            continue;
+        } else if (rs == RS_RET_ERR) {
+            _LOG_W("recv_and_send error.");
+            break;
         }
     }
 

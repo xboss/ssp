@@ -6,21 +6,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "stream_buf.h"
-
 #define _OK 0
 #define _ERR -1
 
-#ifndef _ALLOC
-#define _ALLOC(_p, _type, _size)   \
-    (_p) = (_type)malloc((_size)); \
-    if (!(_p)) {                   \
-        perror("alloc error");     \
-        exit(1);                   \
-    }
-#endif
-
-#define DEF_LINE_SIZE 128
+// #define MAX_LINE_SIZE (1024)
+// #define MAX_ROWS (1024)
+// #define MAX_KEY_SIZE (MAX_LINE_SIZE / 2)
+// #define MAX_VALUE_SIZE (MAX_LINE_SIZE / 2)
 
 typedef struct {
     char *key;
@@ -30,50 +22,105 @@ typedef struct {
 struct ssconf_s {
     ssconf_item_t **items;
     int items_cnt;
+    int max_line_size;
+    int max_rows;
+    int max_key_size;
+    int max_value_size;
 };
 
-static char *trim(char *str) {
-    char *p = str;
-    char *p1;
-    if (p) {
-        p1 = p + strlen(str) - 1;
-        while (*p && isspace(*p)) p++;
-        while (p1 > p && isspace(*p1)) *p1-- = '\0';
+inline static char *trim(char *str) {
+    char *end;
+    // 如果字符串为空或仅包含空白字符，则返回空指针
+    if (str == NULL || *str == '\0') {
+        return str;
     }
-    return p;
+    // 跳过字符串前面的所有空白字符
+    while (isspace((unsigned char)*str)) str++;
+    // 如果整个字符串都是空白字符
+    if (*str == '\0') {
+        return str;
+    }
+    // 找到字符串末尾
+    end = str + strlen(str) - 1;
+    // 移动到最后一个非空白字符
+    while (end > str && isspace((unsigned char)*end)) end--;
+    // 将最后一个非空白字符后的字符设为结束符
+    *(end + 1) = '\0';
+    return str;
 }
 
-static void fill_conf(ssconf_t *conf, const char *k, const char *v) {
-    /* printf("k:%s v:%s\n", k, v); */
-    int i;
-    int vl;
-    char *tv;
-    for (i = 0; i < conf->items_cnt; i++) {
-        if (strcmp(k, conf->items[i]->key) == 0) {
-            vl = strlen(v);
-            _ALLOC(tv, char *, vl + 1);
-            memset(tv, 0, vl + 1);
-            memcpy(tv, v, vl);
-            conf->items[i]->value = tv;
-        }
-    }
-}
+// static void fill_conf(ssconf_t *conf, const char *k, const char *v) {
+//     /* printf("k:%s v:%s\n", k, v); */
+//     int i;
+//     int vl;
+//     char *tv;
+//     for (i = 0; i < conf->items_cnt; i++) {
+//         if (strcmp(k, conf->items[i]->key) == 0) {
+//             vl = strlen(v);
+//             _ALLOC(tv, char *, vl + 1);
+//             memset(tv, 0, vl + 1);
+//             memcpy(tv, v, vl);
+//             conf->items[i]->value = tv;
+//         }
+//     }
+// }
 
-static void read_kv(ssconf_t *conf, char *line) {
-    /* printf("%s\n", line); */
-    char *k = NULL;
-    char *v = NULL;
-    char *d = "=";
-    if (strlen(line) == 0) return;
-    char *p = trim(line);
-    if (*p == '#') return;
-    k = strtok(p, d);
-    if (k == NULL) return;
-    v = strtok(NULL, d);
-    if (v == NULL) return;
-    k = trim(k);
-    v = trim(v);
-    fill_conf(conf, k, v);
+// static void read_kv(ssconf_t *conf, char *line) {
+//     /* printf("%s\n", line); */
+//     char *k = NULL;
+//     char *v = NULL;
+//     char *d = "=";
+//     if (strlen(line) == 0) return;
+//     char *p = trim(line);
+//     if (*p == '#') return;
+//     k = strtok(p, d);
+//     if (k == NULL) return;
+//     v = strtok(NULL, d);
+//     if (v == NULL) return;
+//     k = trim(k);
+//     v = trim(v);
+//     fill_conf(conf, k, v);
+// }
+
+inline static int parse_line(ssconf_t *conf, char *line, int rows) {
+    char *eqp = strchr(line, '=');
+    if (eqp == NULL) {
+        fprintf(stderr, "line:%d format error. must be in the format of 'key=value'\n", rows + 1);
+        return _ERR;
+    }
+    int key_len = eqp - line;
+    if (key_len > conf->max_key_size) {
+        fprintf(stderr, "line:%d 'key' is too long. must be less than %d\n", rows + 1, conf->max_key_size);
+        return _ERR;
+    }
+    int value_len = line + strlen(line) - eqp;
+    if (value_len > conf->max_value_size) {
+        fprintf(stderr, "line:%d 'value' is too long. must be less than %d\n", rows + 1, conf->max_value_size);
+        return _ERR;
+    }
+
+    ssconf_item_t *item = (ssconf_item_t *)calloc(1, sizeof(ssconf_item_t));
+    if (!item) {
+        fprintf(stderr, "alloc error in config.\n");
+        return _ERR;
+    }
+    item->key = (char *)calloc(1, key_len + 1);
+    if (!item->key) {
+        fprintf(stderr, "alloc error in config.\n");
+        free(item);
+        return _ERR;
+    }
+    item->value = (char *)calloc(1, value_len + 1);
+    if (!item->value) {
+        fprintf(stderr, "alloc error in config.\n");
+        free(item->key);
+        free(item);
+        return _ERR;
+    }
+    memcpy(item->key, line, key_len);
+    memcpy(item->value, eqp + 1, value_len);
+    conf->items[conf->items_cnt++] = item;
+    return _OK;
 }
 
 int ssconf_load(ssconf_t *conf, const char *file) {
@@ -82,84 +129,74 @@ int ssconf_load(ssconf_t *conf, const char *file) {
         fprintf(stderr, "can't open config file %s\n", file);
         return _ERR;
     }
-    stream_buf_t *sb = sb_init(NULL, 0);
-    char line[DEF_LINE_SIZE];
+    int ret = _OK;
+    // char line[MAX_LINE_SIZE + 1] = {0};
+    char *line = (char *)calloc(conf->max_line_size + 1, sizeof(char));
+    int rows = 0;
     char *p = NULL;
-    int rt;
-    char *tmpbuf;
-    int sb_sz;
-    int line_sz;
-    while (fgets(line, DEF_LINE_SIZE, fp) != NULL) {
-        sb_sz = sb_get_size(sb);
-        tmpbuf = line;
-        line_sz = DEF_LINE_SIZE;
-        if (sb_sz > 0) {
-            _ALLOC(tmpbuf, char *, sb_sz + DEF_LINE_SIZE);
-            rt = sb_read_all(sb, tmpbuf, sb_sz + DEF_LINE_SIZE);
-            assert(rt == sb_sz);
-            memcpy(tmpbuf + rt, line, DEF_LINE_SIZE);
-            line_sz = sb_sz + DEF_LINE_SIZE;
+    for (; fgets(line, conf->max_line_size, fp) != NULL; rows++) {
+        if (rows > conf->max_rows) {
+            fprintf(stderr, "too many lines in file:%s, must be less than %d\n", file, conf->max_rows);
+            ret = _ERR;
+            break;
         }
-        p = tmpbuf;
-        while (*p != '\n' && p - tmpbuf < line_sz - 1) {
-            p++;
+
+        if (line[conf->max_line_size] != '\0') {
+            fprintf(stderr, "line:%d is too long. must be less than %d\n", rows + 1, conf->max_line_size);
+            ret = _ERR;
+            break;
         }
-        if (*p != '\n') {
-            rt = sb_write(sb, tmpbuf, p - tmpbuf);
-            assert(rt == 0);
-        } else {
-            *p = '\0';
-            read_kv(conf, tmpbuf);
+        if (line[0] == '\0' || line[0] == '#' || line[0] == '\n') continue;
+        p = trim(line);
+        if (p == NULL || strlen(p) == 0) continue;
+        if (p[0] == '=' || p[strlen(p) - 1] == '=') {
+            fprintf(stderr, "line:%d format error. must be in the format of 'key=value'\n", rows + 1);
+            ret = _ERR;
+            break;
         }
-        if (sb_sz > 0) free(tmpbuf);
+        if (parse_line(conf, p, rows) == _ERR) {
+            ret = _ERR;
+            break;
+        }
     }
-    sb_sz = sb_get_size(sb);
-    if (sb_sz > 0) {
-        _ALLOC(tmpbuf, char *, sb_sz);
-        rt = sb_read_all(sb, tmpbuf, sb_sz);
-        assert(rt == sb_sz);
-        read_kv(conf, tmpbuf);
-        free(tmpbuf);
-    }
-    sb_free(sb);
+    free(line);
     fclose(fp);
-    return _OK;
+    return ret;
 }
 
 char *ssconf_get_value(ssconf_t *conf, char *key) {
     if (!conf || !key) return NULL;
-    int i;
-    for (i = 0; i < conf->items_cnt; i++) {
-        if (strcmp(key, conf->items[i]->key) == 0) return conf->items[i]->value;
+    for (int i = 0; i < conf->items_cnt; i++) {
+        if (strcmp(key, trim(conf->items[i]->key)) == 0) return trim(conf->items[i]->value);
     }
     return NULL;
 }
 
-ssconf_t *ssconf_init(char *keys[], int cnt) {
-    if (!keys || cnt <= 0) {
+ssconf_t *ssconf_init(int max_line_size, int max_rows) {
+    ssconf_t *conf = (ssconf_t *)calloc(1, sizeof(ssconf_t));
+    if (!conf) {
+        fprintf(stderr, "alloc error in ssconf_init.\n");
         return NULL;
     }
-    ssconf_t *_ALLOC(conf, ssconf_t *, sizeof(ssconf_t));
-    _ALLOC(conf->items, ssconf_item_t **, sizeof(ssconf_item_t *) * cnt);
-    int i;
-    ssconf_item_t *item;
-    for (i = 0; i < cnt; i++) {
-        if (!keys[i] || strlen(keys[i]) <= 0) continue;
-        _ALLOC(item, ssconf_item_t *, sizeof(ssconf_item_t));
-        memset(item, 0, sizeof(ssconf_item_t));
-        item->key = keys[i];
-        conf->items[i] = item;
+    conf->max_line_size = max_line_size;
+    conf->max_rows = max_rows;
+    conf->max_key_size = max_line_size / 2 - 1;
+    conf->max_value_size = max_line_size / 2 - 1;
+    conf->items = (ssconf_item_t **)calloc(max_rows, sizeof(ssconf_item_t *));
+    if (!conf->items) {
+        fprintf(stderr, "alloc error in ssconf_init.\n");
+        ssconf_free(conf);
+        return NULL;
     }
-    conf->items_cnt = i;
     return conf;
 }
 
 void ssconf_free(ssconf_t *conf) {
     if (!conf) return;
     if (conf->items_cnt > 0) {
-        assert(conf->items);
-        int i;
-        for (i = 0; i < conf->items_cnt; i++) {
+        for (int i = 0; i < conf->items_cnt; i++) {
+            if (!conf->items[i]) continue;
+            if (conf->items[i]->key) free(conf->items[i]->key);
             if (conf->items[i]->value) free(conf->items[i]->value);
             free(conf->items[i]);
         }
@@ -167,19 +204,3 @@ void ssconf_free(ssconf_t *conf) {
     }
     free(conf);
 }
-
-/* "mode", "listen_ip", "listen_port", "listen_ip", "listen_port", "password", "timeout", "read_buf_size" */
-/* int main(int argc, char const *argv[]) {
-    char *keys[] = {"mode",        "listen_ip", "listen_port", "listen_ip",
-                    "listen_port", "password",  "timeout",     "read_buf_size"};
-    ssconf_t *conf = ssconf_init(keys, sizeof(keys) / sizeof(char *));
-    ssconf_load(conf, "./local.conf");
-    int i;
-    char *v;
-    for (i = 0; i < sizeof(keys) / sizeof(char *); i++) {
-        v = ssconf_get_value(conf, keys[i]);
-        printf("%s : %s\n", keys[i], v);
-    }
-    ssconf_free(conf);
-    return 0;
-} */

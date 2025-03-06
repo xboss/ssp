@@ -13,7 +13,8 @@ src/ssconf.c
 src/sslog.c
 src/sspipe.c
 src/sstcp.c
-src/stream_buf.c
+src/ssbuff.c
+# src/test_proxy.c
 )
 
 
@@ -28,5 +29,6 @@ target_link_libraries(ssp pthread)
 # add_executable(ssp_static ${SOURCE_FILES})
 # target_link_libraries(ssp_static ssl -static)
 # target_link_libraries(ssp_static crypto -static)
+# target_link_libraries(ssp_static pthread -static)
 
 #cmake -DCMAKE_BUILD_TYPE=Debug ..

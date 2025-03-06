@@ -12,18 +12,18 @@
 #include "sspipe.h"
 
 static ssconfig_t g_conf;
-static sspipe_t* g_pipe;
+static sspipe_t *g_pipe;
 
-static int load_conf(const char* conf_file, ssconfig_t* conf) {
-    char* keys[] = {"mode",     "listen_ip", "listen_port",   "target_ip", "target_port",
+static int load_conf(const char *conf_file, ssconfig_t *conf) {
+    char *keys[] = {"mode",     "listen_ip", "listen_port",   "target_ip", "target_port",
                     "password", "timeout",   "read_buf_size", "log_file",  "log_level"};
-    int keys_cnt = sizeof(keys) / sizeof(char*);
-    ssconf_t* cf = ssconf_init(keys, keys_cnt);
-    assert(cf);
+    int keys_cnt = sizeof(keys) / sizeof(char *);
+    ssconf_t *cf = ssconf_init(1024, 1024);
+    if (!cf) return _ERR;
     int rt = ssconf_load(cf, conf_file);
     if (rt != 0) return _ERR;
     conf->log_level = SSLOG_LEVEL_ERROR;
-    char* v = NULL;
+    char *v = NULL;
     int i;
     for (i = 0; i < keys_cnt; i++) {
         v = ssconf_get_value(cf, keys[i]);
@@ -37,11 +37,7 @@ static int load_conf(const char* conf_file, ssconfig_t* conf) {
                 conf->mode = SSPIPE_MODE_LOCAL;
             } else if (strcmp(v, "remote") == 0) {
                 conf->mode = SSPIPE_MODE_REMOTE;
-            }
-            // else if (strcmp(v, "socks5") == 0) {
-            //     conf->mode = SSPIPE_MODE_SOCKS5;
-            // }
-            else {
+            } else {
                 conf->mode = -1;
             }
         } else if (strcmp("listen_ip", keys[i]) == 0) {
@@ -65,7 +61,7 @@ static int load_conf(const char* conf_file, ssconfig_t* conf) {
         else if (strcmp("read_buf_size", keys[i]) == 0) {
             conf->read_buf_size = atoi(v);
         } else if (strcmp("log_file", keys[i]) == 0) {
-            conf->log_file = (char*)calloc(1, len + 1);
+            conf->log_file = (char *)calloc(1, len + 1);
             if (!conf->log_file) {
                 perror("alloc error");
                 exit(1);
@@ -86,14 +82,14 @@ static int load_conf(const char* conf_file, ssconfig_t* conf) {
                 conf->log_level = SSLOG_LEVEL_FATAL;
             }
         }
-        printf("%s : %s\n", keys[i], v);
+        printf("%s:%s\n", keys[i], v);
     }
     ssconf_free(cf);
     printf("------------\n");
     return _OK;
 }
 
-static int check_config(ssconfig_t* conf) {
+static int check_config(ssconfig_t *conf) {
     if (conf->listen_port > 65535) {
         fprintf(stderr, "Invalid listen_port:%u in configfile.\n", conf->listen_port);
         return _ERR;
@@ -129,7 +125,7 @@ static void signal_handler(int sn) {
     }
 }
 
-int main(int argc, char const* argv[]) {
+int main(int argc, char const *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <config file>\n", argv[0]);
         return 1;
@@ -140,7 +136,7 @@ int main(int argc, char const* argv[]) {
     if (check_config(&g_conf) != 0) return 1;
     sslog_init(g_conf.log_file, g_conf.log_level);
     if (g_conf.log_file) free(g_conf.log_file);
-    strcpy((char*)g_conf.iv, "bewatermyfriend.");
+    strcpy((char *)g_conf.iv, "bewatermyfriend.");
 
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, signal_handler);
