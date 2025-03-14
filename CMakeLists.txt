@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(ssp)
 
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_C_WALL ON)
+# set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -Wall")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -Wall -Wno-unused-function -D_GNU_SOURCE")
+# set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -Wall -D_GNU_SOURCE")
 
 
 # 添加源文件

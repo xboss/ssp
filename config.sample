@@ -1,11 +1,10 @@
-mode = local|remote|socks5
+mode = local|remote
 listen_ip = 127.0.0.1
-listen_port = 2222
+listen_port = 1111
 target_ip = 127.0.0.1
-target_port = 2223
+target_port = 1112
 password = yourpassword
-timeout = 1000
-read_buf_size = 0
+ticket = yourticketyourticketyourticket12
 log_file = xxx.log
 log_level = DEBUG|INFO|NOTICE|WARN|ERROR|FATAL
 

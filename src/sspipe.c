@@ -62,7 +62,7 @@ static int send_auth_req(sspipe_t* pipe, int fd) {
     uint32_t payload_len_net = htonl(payload_len);
     memcpy(pkt_buf, &payload_len_net, PACKET_HEAD_LEN);
     pkt_len += PACKET_HEAD_LEN;
-    int cipher_len = 0;
+    size_t cipher_len = 0;
     if (strlen((const char*)pipe->conf->key) > 0 && strlen((const char*)pipe->conf->iv) > 0) {
         if (crypto_encrypt(pipe->conf->key, pipe->conf->iv, (const unsigned char*)pipe->conf->ticket,
                            SSPIPE_TICKET_SIZE, (unsigned char*)pkt_buf + PACKET_HEAD_LEN, (size_t*)&cipher_len)) {
@@ -114,7 +114,7 @@ static int do_auth(sspipe_t* pipe, int fd) {
     }
     assert(pkt_len == PACKET_HEAD_LEN + SSPIPE_TICKET_SIZE);
     if (strlen((const char*)pipe->conf->key) > 0 && strlen((const char*)pipe->conf->iv) > 0) {
-        int cipher_len = 0;
+        size_t cipher_len = 0;
         if (crypto_decrypt(pipe->conf->key, pipe->conf->iv, (const unsigned char*)pkt_buf + PACKET_HEAD_LEN,
                            SSPIPE_TICKET_SIZE, (unsigned char*)buf, (size_t*)&cipher_len)) {
             _LOG_E("crypto decrypt failed when do_auth");
