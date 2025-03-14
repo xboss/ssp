@@ -90,7 +90,7 @@ static void accept_cb(EV_P_ ev_io *w, int revents) {
     int back_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (back_fd < 0) {
         perror("back socket creation failed");
-        return _ERR;
+        return;
     }
     set_nonblocking(back_fd);
     set_nodelay(back_fd);
@@ -99,11 +99,11 @@ static void accept_cb(EV_P_ ev_io *w, int revents) {
     target_addr.sin_port = htons(ssp_server->conf->target_port);
     if (inet_pton(AF_INET, ssp_server->conf->target_ip, &target_addr.sin_addr) <= 0) {
         perror("inet_pton failed");
-        return _ERR;
+        return;
     }
     if (connect(back_fd, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
         perror("Connection failed");
-        return _ERR;
+        return;
     }
     _LOG("Connected to server at %s:%d", ssp_server->conf->target_ip, ssp_server->conf->target_port);
     _LOG("front_fd: %d backend_fd: %d", front_fd, back_fd);
