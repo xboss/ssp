@@ -1,11 +1,12 @@
-#ifndef _SS_H
-#define _SS_H
+#ifndef _SSP_H
+#define _SSP_H
 
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ev.h>
 
 #include "crypto.h"
 #include "ssbuff.h"
@@ -19,9 +20,9 @@
 #define _OK 0
 #define _ERR -1
 
-#define SSPIPE_MODE_LOCAL 0
-#define SSPIPE_MODE_REMOTE 1
-#define SSPIPE_TICKET_SIZE (32)
+#define SSP_MODE_LOCAL 0
+#define SSP_MODE_REMOTE 1
+#define SSP_TICKET_SIZE (32)
 
 typedef struct {
     char listen_ip[INET_ADDRSTRLEN + 1];
@@ -30,7 +31,7 @@ typedef struct {
     unsigned short target_port;
     unsigned char key[AES_128_KEY_SIZE + 1];
     unsigned char iv[AES_BLOCK_SIZE + 1];
-    char ticket[SSPIPE_TICKET_SIZE + 1];
+    char ticket[SSP_TICKET_SIZE + 1];
     int mode;
     int send_timeout;  // 发送超时时间（毫秒）
     int recv_timeout;  // 接收超时时间（毫秒）
@@ -38,4 +39,4 @@ typedef struct {
     int log_level;
 } ssconfig_t;
 
-#endif /* SS_H */
+#endif /* _SSP_H */
