@@ -15,8 +15,8 @@ static ssconfig_t g_conf;
 static sspipe_t *g_pipe;
 
 static int load_conf(const char *conf_file, ssconfig_t *conf) {
-    char *keys[] = {"mode",    "listen_ip",     "listen_port", "target_ip", "target_port", "password",
-                    "timeout", "read_buf_size", "log_file",    "log_level", "ticket"};
+    char *keys[] = {"mode",     "listen_ip", "listen_port", "target_ip", "target_port",
+                    "password", "log_file",  "log_level",   "ticket"};
     int keys_cnt = sizeof(keys) / sizeof(char *);
     ssconf_t *cf = ssconf_init(1024, 1024);
     if (!cf) return _ERR;
@@ -56,12 +56,6 @@ static int load_conf(const char *conf_file, ssconfig_t *conf) {
             memcpy(conf->key, v, strnlen(v, AES_128_KEY_SIZE));
         } else if (strcmp("ticket", keys[i]) == 0) {
             memcpy(conf->ticket, v, strnlen(v, SSPIPE_TICKET_SIZE));
-        }
-        // else if (strcmp("timeout", keys[i]) == 0) {
-        //     conf->timeout = atoi(v);
-        // }
-        else if (strcmp("read_buf_size", keys[i]) == 0) {
-            conf->read_buf_size = atoi(v);
         } else if (strcmp("log_file", keys[i]) == 0) {
             conf->log_file = (char *)calloc(1, len + 1);
             if (!conf->log_file) {
