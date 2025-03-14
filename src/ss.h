@@ -1,8 +1,16 @@
 #ifndef _SS_H
 #define _SS_H
 
+#include <assert.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "crypto.h"
+#include "ssbuff.h"
 #include "sslog.h"
+#include "uthash.h"
 
 #if !defined(INET_ADDRSTRLEN)
 #define INET_ADDRSTRLEN 16

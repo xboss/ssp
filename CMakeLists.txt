@@ -9,7 +9,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -Wall -Wno-unused-function -D_GNU_S
 # 添加源文件
 set(SOURCE_FILES
 src/crypto.c
-src/main.c
+# src/main.c
 src/ssconf.c
 src/sslog.c
 src/sspipe.c
