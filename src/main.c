@@ -105,8 +105,8 @@ static void sig_cb(struct ev_loop* loop, ev_signal* w, int revents) {
         return;
     }
     if (w->signum == SIGINT) {
-        ev_break(loop, EVBREAK_ALL); /* TODO: */
-        // ssp_server_stop(g_ssp_server); 
+        ssp_server_stop(g_ssp_server); 
+        ev_break(loop, EVBREAK_ALL);
         return;
     }
     // if (w->signum == SIGUSR1) {

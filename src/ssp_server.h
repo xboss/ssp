@@ -9,7 +9,6 @@ typedef struct {
     sspipe_ctx_t* sspipe_ctx;
     int listen_fd;
     ev_io *accept_watcher;
-    ev_io *connect_watcher;
     struct ev_loop *loop;
 } ssp_server_t;
 

@@ -24,6 +24,7 @@ struct sspipe_ctx_s {
     unsigned char* iv;
     char* pkt_buf;
     int max_pkt_buf_size;
+    struct ev_loop* loop;
     int connect_timeout;
 };
 
@@ -56,10 +57,11 @@ inline static sspipe_t* new_sspipe(int in_id) {
     return pipe;
 }
 
-inline static void free_sspipe(sspipe_t* pipe) {
+inline static void free_sspipe(sspipe_ctx_t* ctx, sspipe_t* pipe) {
     if (!pipe) {
         return;
     }
+    _LOG("free pipe. in_id:%d", pipe->in_id);
     if (pipe->in_buf) {
         ssbuff_free(pipe->in_buf);
         pipe->in_buf = NULL;
@@ -71,10 +73,12 @@ inline static void free_sspipe(sspipe_t* pipe) {
     pipe->in_id = 0;
     pipe->out_id = 0;
     if (pipe->read_watcher) {
+        ev_io_stop(ctx->loop, pipe->read_watcher);
         free(pipe->read_watcher);
         pipe->read_watcher = NULL;
     }
     if (pipe->write_watcher) {
+        ev_io_stop(ctx->loop, pipe->write_watcher);
         free(pipe->write_watcher);
         pipe->write_watcher = NULL;
     }
@@ -220,7 +224,7 @@ int sspipe_new(sspipe_ctx_t* ctx, int in_id, sspipe_type_t type, int is_activity
     }
     sspipe_t* pipe = new_sspipe(in_id);
     if (!pipe) {
-        free_sspipe(pipe);
+        free_sspipe(ctx, pipe);
         return _ERR;
     }
     pipe->type = type;
@@ -229,12 +233,12 @@ int sspipe_new(sspipe_ctx_t* ctx, int in_id, sspipe_type_t type, int is_activity
     pipe->is_activity = is_activity;
     pipe->read_watcher = (ev_io*)calloc(1, sizeof(ev_io));
     if (!pipe->read_watcher) {
-        free_sspipe(pipe);
+        free_sspipe(ctx, pipe);
         return _ERR;
     }
     pipe->write_watcher = (ev_io*)calloc(1, sizeof(ev_io));
     if (!pipe->write_watcher) {
-        free_sspipe(pipe);
+        free_sspipe(ctx, pipe);
         return _ERR;
     }
     HASH_ADD_INT(ctx->pipe_index, in_id, pipe);
@@ -270,7 +274,7 @@ void sspipe_del(sspipe_ctx_t* ctx, int in_id) {
     sspipe_t* pipe = get_sspipe(ctx, in_id);
     if (pipe) {
         HASH_DEL(ctx->pipe_index, pipe);
-        free_sspipe(pipe);
+        free_sspipe(ctx, pipe);
     }
     return;
 }
@@ -363,12 +367,13 @@ ssbuff_t* sspipe_take(sspipe_ctx_t* ctx, int id) {
     return pipe->out_buf;
 }
 
-sspipe_ctx_t* sspipe_init(const char* key, int key_len, const char* iv, int iv_len, int connect_timeout, int max_pkt_buf_size) {
+sspipe_ctx_t* sspipe_init(struct ev_loop* loop, const char* key, int key_len, const char* iv, int iv_len, int connect_timeout, int max_pkt_buf_size) {
     sspipe_ctx_t* ctx = (sspipe_ctx_t*)calloc(1, sizeof(sspipe_ctx_t));
     if (!ctx) {
         _LOG_E("sspipe_init: calloc failed");
         return NULL;
     }
+    ctx->loop = loop;
     ctx->connect_timeout = connect_timeout;
     ctx->pipe_index = NULL;
     if (key) {
@@ -421,7 +426,7 @@ void sspipe_free(sspipe_ctx_t* ctx) {
         sspipe_t *pipe, *tmp;
         HASH_ITER(hh, ctx->pipe_index, pipe, tmp) {
             HASH_DEL(ctx->pipe_index, pipe);
-            free_sspipe(pipe);
+            free_sspipe(ctx, pipe);
         }
         ctx->pipe_index = NULL;
     }
