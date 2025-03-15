@@ -105,13 +105,14 @@ static void sig_cb(struct ev_loop* loop, ev_signal* w, int revents) {
         return;
     }
     if (w->signum == SIGINT) {
-        ssp_server_stop(g_ssp_server); 
+        if (g_ssp_server) ssp_server_stop(g_ssp_server);
         ev_break(loop, EVBREAK_ALL);
         return;
     }
-    // if (w->signum == SIGUSR1) {
-    //     return;
-    // }
+    if (w->signum == SIGUSR1) {
+        if (g_ssp_server) ssp_monitor(g_ssp_server);
+        return;
+    }
 }
 
 int main(int argc, char const* argv[]) {
@@ -136,6 +137,10 @@ int main(int argc, char const* argv[]) {
     ev_signal sig_int_watcher;
     ev_signal_init(&sig_int_watcher, sig_cb, SIGINT);
     ev_signal_start(g_loop, &sig_int_watcher);
+
+    ev_signal sig_usr1_watcher;
+    ev_signal_init(&sig_usr1_watcher, sig_cb, SIGUSR1);
+    ev_signal_start(g_loop, &sig_usr1_watcher);
 
     g_ssp_server = ssp_server_init(g_loop, &g_conf);
     if (!g_ssp_server) {

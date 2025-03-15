@@ -39,6 +39,14 @@ static int set_nodelay(int fd) {
     return _OK;
 }
 
+static void close_conn(ssp_server_t* ssp_server, int fd) {
+    int fd2 = sspipe_get_bind_id(ssp_server->sspipe_ctx, fd);
+    assert(fd2 > 0); 
+    sspipe_unbind(ssp_server->sspipe_ctx, fd);
+    close(fd);
+    close(fd2);
+}
+
 static int send_all(int fd, const char* buf, int len) {
     int sent = 0, s = len;
     while (sent < len) {
@@ -75,26 +83,23 @@ static void write_cb(EV_P_ ev_io* w, int revents) {
     ev_io* w_watcher = sspipe_get_write_watcher(ssp_server->sspipe_ctx, fd);
     assert(w_watcher);
 
-    if (!sspipe_is_activity(ssp_server->sspipe_ctx, fd))
-    {
+    if (!sspipe_is_activity(ssp_server->sspipe_ctx, fd)) {
         sspipe_set_activity(ssp_server->sspipe_ctx, fd, 1);
         _LOG("write_cb activity fd: %d", fd);
         // ev_io_stop(ssp_server->loop, w_watcher);
         // return;
     }
-    
 
     ssbuff_t* out = sspipe_take(ssp_server->sspipe_ctx, fd);
     if (!out) {
         _LOG("write_cb no data");
         return;
     }
-    
+
     int sent = send_all(fd, out->buf, out->len);
     if (sent == _ERR) {
         _LOG("write_cb close fd: %d", fd);
-        sspipe_unbind(ssp_server->sspipe_ctx, fd);
-        close(fd);
+        close_conn(ssp_server, fd);
         return;
     }
     if (sent < out->len) {
@@ -105,7 +110,7 @@ static void write_cb(EV_P_ ev_io* w, int revents) {
         return;
     }
     assert(sent == out->len);
-    out->len=0;
+    out->len = 0;
     ev_io_stop(ssp_server->loop, w_watcher);
     _LOG("write_cb send ok. fd: %d", fd);
 }
@@ -131,10 +136,10 @@ static void read_cb(EV_P_ ev_io* w, int revents) {
     do {
         if (len < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                _LOG("read EAGAIN");
+                // _LOG("read EAGAIN");
                 break;
             } else {
-                perror("server read failed");
+                _LOG_E("server read failed error: %d", errno);
                 ret = _ERR;
                 break;
             }
@@ -153,8 +158,7 @@ static void read_cb(EV_P_ ev_io* w, int revents) {
     } while (0);
     if (ret == _ERR) {
         _LOG("read_cb close fd: %d", fd);
-        sspipe_unbind(ssp_server->sspipe_ctx, fd);
-        close(fd);
+        close_conn(ssp_server, fd);
     }
 }
 
@@ -195,8 +199,8 @@ static void accept_cb(EV_P_ ev_io* w, int revents) {
     }
     if (connect(back_fd, (struct sockaddr*)&target_addr, sizeof(target_addr)) < 0) {
         // _LOG_E("back connect failed error: %d", errno);
-        if (errno!= EINPROGRESS) {
-             perror("Connection failed");
+        if (errno != EINPROGRESS) {
+            perror("Connection failed");
             return;
         }
     }
@@ -320,7 +324,7 @@ int ssp_server_start(ssp_server_t* ssp_server) {
 
 void ssp_server_stop(ssp_server_t* ssp_server) {
     if (!ssp_server) return;
-    
+
     if (ssp_server->accept_watcher) {
         ev_io_stop(ssp_server->loop, ssp_server->accept_watcher);
     }
@@ -337,12 +341,19 @@ void ssp_server_free(ssp_server_t* ssp_server) {
         free(ssp_server->accept_watcher);
         ssp_server->accept_watcher = NULL;
     }
-    
+
     if (ssp_server->sspipe_ctx) {
         sspipe_free(ssp_server->sspipe_ctx);
         ssp_server->sspipe_ctx = NULL;
     }
-    
+
     free(ssp_server);
 }
 
+void ssp_monitor(ssp_server_t* ssp_server) {
+    _LOG("*********************************");
+    _LOG("*            monitor            *")
+    _LOG("*********************************");
+    sspipe_print_info(ssp_server->sspipe_ctx);
+    _LOG("---------------------------------");
+}
