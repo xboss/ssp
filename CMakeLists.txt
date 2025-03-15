@@ -21,17 +21,16 @@ src/ssp_server.c
 
 
 ############# ssp #############
-add_executable(ssp ${SOURCE_FILES})
-target_link_libraries(ssp ssl)
-target_link_libraries(ssp crypto)
-target_link_libraries(ssp pthread)
-target_link_libraries(ssp ev)
+add_executable(ssplibev ${SOURCE_FILES})
+target_link_libraries(ssplibev ssl)
+target_link_libraries(ssplibev crypto)
+target_link_libraries(ssplibev ev)
 
 
 ############# static #############
-# add_executable(ssp_static ${SOURCE_FILES})
-# target_link_libraries(ssp_static ssl -static)
-# target_link_libraries(ssp_static crypto -static)
-# target_link_libraries(ssp_static pthread -static)
+add_executable(ssplibev_static ${SOURCE_FILES})
+target_link_libraries(ssplibev_static ssl -static)
+target_link_libraries(ssplibev_static crypto -static)
+target_link_libraries(ssplibev_static ev -static)
 
 #cmake -DCMAKE_BUILD_TYPE=Debug ..
