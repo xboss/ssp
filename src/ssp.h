@@ -24,6 +24,8 @@
 #define SSP_MODE_REMOTE 1
 #define SSP_TICKET_SIZE (32)
 
+#define SSP_CONNECT_TIMEOUT 5000  // 连接超时时间（毫秒）
+
 typedef struct {
     char listen_ip[INET_ADDRSTRLEN + 1];
     unsigned short listen_port;
@@ -35,7 +37,7 @@ typedef struct {
     int mode;
     int send_timeout;  // 发送超时时间（毫秒）
     int recv_timeout;  // 接收超时时间（毫秒）
-    char* log_file;
+    char log_file[256];
     int log_level;
 } ssconfig_t;
 

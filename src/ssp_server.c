@@ -2,8 +2,8 @@
 
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <sys/socket.h>
 #include <netinet/tcp.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #define BACKLOG 128
@@ -32,45 +32,153 @@ static int setreuseaddr(int fd) {
 
 static int set_nodelay(int fd) {
     int opt = 1;
-    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&opt, sizeof(opt)) < 0) {
+    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char*)&opt, sizeof(opt)) < 0) {
         perror("Failed to set TCP_NODELAY");
         return _ERR;
     }
     return _OK;
 }
 
+static int send_all(int fd, const char* buf, int len) {
+    int sent = 0, s = len;
+    while (sent < len) {
+        s = write(fd, buf + sent, s - sent);
+        if (s < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                _LOG("send EAGAIN");
+                break;
+            } else {
+                _LOG_E("server send failed");
+                sent = _ERR;
+                break;
+            }
+        }
+        if (s == 0) {
+            sent = _ERR;
+            break;
+        }
+        sent += s;
+    }
+    return sent;
+}
+
 ////////////////////////////////
 // callbacks
 ////////////////////////////////
 
-int sspipe_output_cb(const char* buf, int len, int id, void* user){
-    /* TODO: start write watcher */
-    // int sent = 0, s = len;
-    // while (sent < len) {
-    //     s = send(id, buf + sent, s - sent, 0);
-    //     if (s < 0) {
-    //         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-    //             _LOG("send EAGAIN");
-    //             return;
-    //         } else {
-    //             _LOG_E("server send failed");
-    //             return _ERR;
-    //         }
-    //     }
-    //     if (s < 0) {
-    //         return _ERR;
-    //     }
-    //     sent += s;
+static void write_cb(EV_P_ ev_io* w, int revents) {
+    assert(revents & EV_WRITE);
+    ssp_server_t* ssp_server = (ssp_server_t*)w->data;
+    assert(ssp_server);
+    int fd = w->fd;
+
+    ev_io* w_watcher = sspipe_get_write_watcher(ssp_server->sspipe_ctx, fd);
+    assert(w_watcher);
+
+    if (!sspipe_is_activity(ssp_server->sspipe_ctx, fd))
+    {
+        sspipe_set_activity(ssp_server->sspipe_ctx, fd, 1);
+        ev_io_stop(ssp_server->loop, w_watcher);
+        return;
+    }
+    
+
+    ssbuff_t* out = sspipe_take(ssp_server->sspipe_ctx, fd);
+    if (!out) {
+        _LOG("write_cb no data");
+        return;
+    }
+    
+    int sent = send_all(fd, out->buf, out->len);
+    if (sent == _ERR) {
+        _LOG("write_cb close fd: %d", fd);
+        ev_io_stop(ssp_server->loop, w_watcher);
+        sspipe_unbind(ssp_server->sspipe_ctx, fd);
+        close(fd);
+        return;
+    }
+    if (sent < out->len) {
+        // pending
+        _LOG("write_cb pending");
+        memmove(out->buf, out->buf + sent, out->len - sent);
+        out->len -= sent;
+        return;
+    }
+    assert(sent == out->len);
+    ev_io_stop(ssp_server->loop, w_watcher);
+    _LOG("write_cb send ok. fd: %d", fd);
+}
+
+int sspipe_output_cb(int id, void* user) {
+    ssp_server_t* ssp_server = (ssp_server_t*)user;
+    assert(ssp_server);
+    ev_io* w_watcher = sspipe_get_write_watcher(ssp_server->sspipe_ctx, id);
+    assert(w_watcher);
+    ev_io_start(ssp_server->loop, w_watcher);
+    // int ret = send_all(id, buf, len);
+    // if (ret == _ERR) {
+    //     _LOG("sspipe_output_cb close fd: %d", id);
+    //     ev_io* r_watcher = sspipe_get_read_watcher(ssp_server->sspipe_ctx, id);
+    //     if (r_watcher) ev_io_stop(ssp_server->loop, r_watcher);
+    //     sspipe_unbind(ssp_server->sspipe_ctx, id);
+    //     close(id);
+    //     return _ERR;
     // }
-    // assert(sent == len);
+    // if (ret == 1) {
+    //     // pending
+    //     _LOG("sspipe_output_cb pending");
+    //     ev_io* w_watcher = sspipe_get_write_watcher(ssp_server->sspipe_ctx, id);
+    //     if (w_watcher) ev_io_start(ssp_server->loop, w_watcher);
+    //     _LOG("sspipe_output_cb send pending. fd: %d", id);
+    // }
+    // _LOG("sspipe_output_cb send ok. fd: %d", id);
     return _OK;
 }
 
-static void accept_cb(EV_P_ ev_io *w, int revents) {
+static void read_cb(EV_P_ ev_io* w, int revents) {
     assert(revents & EV_READ);
     ssp_server_t* ssp_server = (ssp_server_t*)w->data;
     assert(ssp_server);
-    
+    int fd = w->fd;
+    char buf[SSP_RECV_BUF_SIZE];
+    int len = read(fd, buf, sizeof(buf));
+    int ret = 0;
+    do {
+        if (len < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                _LOG("read EAGAIN");
+                return;
+            } else {
+                perror("server read failed");
+                ret = _ERR;
+                break;
+            }
+        }
+        if (len == 0) {
+            // close
+            _LOG("server read EOF");
+            ret = _ERR;
+            break;
+        }
+        if (sspipe_feed(ssp_server->sspipe_ctx, fd, buf, len) != _OK) {
+            _LOG_E("sspipe_feed failed");
+            ret = _ERR;
+            break;
+        }
+    } while (0);
+    if (ret == _ERR) {
+        _LOG("read_cb close fd: %d", fd);
+        ev_io_stop(loop, w);
+        sspipe_unbind(ssp_server->sspipe_ctx, fd);
+        close(fd);
+    }
+}
+
+static void accept_cb(EV_P_ ev_io* w, int revents) {
+    assert(revents & EV_READ);
+    ssp_server_t* ssp_server = (ssp_server_t*)w->data;
+    assert(ssp_server);
+
     struct sockaddr_in front_addr;
     socklen_t len = sizeof(front_addr);
     int front_fd = accept(w->fd, (struct sockaddr*)&front_addr, &len);
@@ -101,31 +209,57 @@ static void accept_cb(EV_P_ ev_io *w, int revents) {
         perror("inet_pton failed");
         return;
     }
-    if (connect(back_fd, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
-        perror("Connection failed");
-        return;
+    if (connect(back_fd, (struct sockaddr*)&target_addr, sizeof(target_addr)) < 0) {
+        // _LOG_E("back connect failed error: %d", errno);
+        if (errno!= EINPROGRESS) {
+             perror("Connection failed");
+            return;
+        }
     }
+
     _LOG("Connected to server at %s:%d", ssp_server->conf->target_ip, ssp_server->conf->target_port);
     _LOG("front_fd: %d backend_fd: %d", front_fd, back_fd);
-    
+
     sspipe_type_t ssp_type = SSPIPE_TYPE_UNPACK;
     if (ssp_server->conf->mode == SSP_MODE_LOCAL) {
         ssp_type = SSPIPE_TYPE_PACK;
     }
-    if (sspipe_new(ssp_server->sspipe_ctx, front_fd, ssp_type, sspipe_output_cb, ssp_server) != _OK) {
-        _LOG_E("sspipe_new failed");
+    if (sspipe_new(ssp_server->sspipe_ctx, front_fd, ssp_type, 1, sspipe_output_cb, ssp_server) != _OK) {
+        _LOG_E("sspipe_new front failed");
         close(front_fd);
         close(back_fd);
         return;
     }
-    if (sspipe_new(ssp_server->sspipe_ctx, back_fd, !ssp_type, sspipe_output_cb, ssp_server) != _OK) {
-        _LOG_E("sspipe_new failed");
+    if (sspipe_new(ssp_server->sspipe_ctx, back_fd, !ssp_type, 0, sspipe_output_cb, ssp_server) != _OK) {
+        _LOG_E("sspipe_new back failed");
         close(front_fd);
         close(back_fd);
-        sspipe_del(ssp_server->sspipe_ctx, front_fd);
         return;
     }
-    if (sspipe_bind(ssp_server->sspipe_ctx, front_fd, back_fd)!= _OK) {
+    ev_io* back_r_watcher = sspipe_get_read_watcher(ssp_server->sspipe_ctx, back_fd);
+    assert(back_r_watcher);
+    ev_io_init(back_r_watcher, read_cb, back_fd, EV_READ);
+    back_r_watcher->data = ssp_server;
+    ev_io_start(loop, back_r_watcher);
+
+    ev_io* back_w_watcher = sspipe_get_write_watcher(ssp_server->sspipe_ctx, back_fd);
+    assert(back_w_watcher);
+    ev_io_init(back_w_watcher, write_cb, back_fd, EV_WRITE);
+    back_w_watcher->data = ssp_server;
+    ev_io_start(loop, back_w_watcher);
+
+    ev_io* front_r_watcher = sspipe_get_read_watcher(ssp_server->sspipe_ctx, front_fd);
+    assert(front_r_watcher);
+    ev_io_init(front_r_watcher, read_cb, front_fd, EV_READ);
+    front_r_watcher->data = ssp_server;
+    ev_io_start(loop, front_r_watcher);
+
+    ev_io* front_w_watcher = sspipe_get_write_watcher(ssp_server->sspipe_ctx, front_fd);
+    assert(front_w_watcher);
+    ev_io_init(front_w_watcher, write_cb, front_fd, EV_WRITE);
+    front_w_watcher->data = ssp_server;
+
+    if (sspipe_bind(ssp_server->sspipe_ctx, front_fd, back_fd) != _OK) {
         _LOG_E("sspipe_bind failed");
         close(front_fd);
         close(back_fd);
@@ -139,21 +273,32 @@ static void accept_cb(EV_P_ ev_io *w, int revents) {
 // API
 ////////////////////////////////
 
-ssp_server_t* ssp_server_init(ssconfig_t* conf) {
+ssp_server_t* ssp_server_init(struct ev_loop* loop, ssconfig_t* conf) {
     ssp_server_t* ssp_server = (ssp_server_t*)calloc(1, sizeof(ssp_server_t));
     if (ssp_server == NULL) {
         _LOG_E("sspipe_init: calloc failed");
         return NULL;
     }
+    ssp_server->accept_watcher = (ev_io*)calloc(1, sizeof(ev_io));
+    if (ssp_server->accept_watcher == NULL) {
+        _LOG_E("sspipe_init: calloc failed");
+        ssp_server_free(ssp_server);
+        return NULL;
+    }
+    ssp_server->connect_watcher = (ev_io*)calloc(1, sizeof(ev_io));
+    if (ssp_server->connect_watcher == NULL) {
+        _LOG_E("sspipe_init: calloc failed");
+        ssp_server_free(ssp_server);
+        return NULL;
+    }
     ssp_server->conf = conf;
-    ssp_server->sspipe_ctx = sspipe_init((const char*)conf->key, AES_128_KEY_SIZE + 1, (const char*)conf->iv, AES_BLOCK_SIZE + 1, SSP_RECV_BUF_SIZE);
+    ssp_server->loop = loop;
+    ssp_server->sspipe_ctx = sspipe_init((const char*)conf->key, AES_128_KEY_SIZE + 1, (const char*)conf->iv, AES_BLOCK_SIZE + 1, SSP_CONNECT_TIMEOUT, SSP_RECV_BUF_SIZE);
     if (ssp_server->sspipe_ctx == NULL) {
         _LOG_E("sspipe_init: sspipe_init failed");
         ssp_server_free(ssp_server);
         return NULL;
     }
-
-    /* TODO: */
     return ssp_server;
 }
 
@@ -188,19 +333,9 @@ int ssp_server_start(ssp_server_t* ssp_server) {
         return _ERR;
     }
 
-    ssp_server->accept_watcher = (ev_io*)calloc(1, sizeof(ev_io));
     ev_io_init(ssp_server->accept_watcher, accept_cb, ssp_server->listen_fd, EV_READ);
     ssp_server->accept_watcher->data = ssp_server;
     ev_io_start(ssp_server->loop, ssp_server->accept_watcher);
-
-    // skt->udp_r_watcher = (ev_io*)calloc(1, sizeof(ev_io));
-    // if (!skt->udp_r_watcher) {
-    //     perror("alloc udp_r_watcher");
-    //     skt_free(skt);
-    //     return NULL;
-    // }
-    // skt->udp_r_watcher->data = skt;
-    /* TODO: */
     return _OK;
 }
 

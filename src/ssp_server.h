@@ -9,10 +9,11 @@ typedef struct {
     sspipe_ctx_t* sspipe_ctx;
     int listen_fd;
     ev_io *accept_watcher;
+    ev_io *connect_watcher;
     struct ev_loop *loop;
 } ssp_server_t;
 
-ssp_server_t* ssp_server_init(ssconfig_t* conf);
+ssp_server_t* ssp_server_init(struct ev_loop *loop, ssconfig_t* conf);
 int ssp_server_start(ssp_server_t* ssp_server);
 void ssp_server_stop(ssp_server_t* ssp_server);
 void ssp_server_free(ssp_server_t* ssp_server);
