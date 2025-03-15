@@ -129,6 +129,14 @@ static int pack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
             return _ERR;
         }
         ssbuff_append(out_pipe->out_buf, ctx->pkt_buf, pkt_len);
+        pkt_len = 0;
+        _LOG("pack to target ok. payload_len:%d", payload_len);
+        remaining -= payload_len;
+        assert(remaining >= 0);
+        if (remaining > 0) {
+            memmove(pipe->in_buf->buf, pipe->in_buf->buf + (pipe->in_buf->len - remaining), remaining);
+        }
+        pipe->in_buf->len = remaining;
         if (out_pipe->output_cb && out_pipe->is_activity) {
             if (out_pipe->output_cb(out_pipe->in_id, out_pipe->user) != _OK) {
                 _LOG_E("pack output_cb failed");
@@ -140,11 +148,6 @@ static int pack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
             sspipe_unbind(ctx, out_pipe->in_id);
             return _ERR;
         }
-
-        pkt_len = 0;
-        _LOG("pack to target ok. payload_len:%d", payload_len);
-        remaining -= payload_len;
-        assert(remaining >= 0);
     }
     return _OK;
 }
@@ -182,6 +185,16 @@ static int unpack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
             return _ERR;
         }
         ssbuff_append(out_pipe->out_buf, ctx->pkt_buf, pkt_len);
+        assert(pkt_len == payload_len);
+        pkt_len = 0;
+        _LOG("unpack output ok.");
+        remaining = pipe->in_buf->len - (payload_len + SSP_PACKET_HEAD_LEN);
+        assert(remaining >= 0);
+        if (remaining > 0) {
+            memmove(pipe->in_buf->buf, pipe->in_buf->buf + payload_len + SSP_PACKET_HEAD_LEN, remaining);
+        }
+        pipe->in_buf->len = remaining;
+
         if (out_pipe->output_cb && out_pipe->is_activity) {
             if (out_pipe->output_cb(out_pipe->in_id, out_pipe->user) != _OK) {
                 _LOG_E("unpack output_cb failed");
@@ -193,16 +206,6 @@ static int unpack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
             sspipe_unbind(ctx, out_pipe->in_id);
             return _ERR;
         }
-
-        assert(pkt_len == payload_len);
-        pkt_len = 0;
-        _LOG("unpack output ok.");
-        remaining = pipe->in_buf->len - (payload_len + SSP_PACKET_HEAD_LEN);
-        assert(remaining >= 0);
-        if (remaining > 0) {
-            memmove(pipe->in_buf->buf, pipe->in_buf->buf + payload_len + SSP_PACKET_HEAD_LEN, remaining);
-        }
-        pipe->in_buf->len = remaining;
     }
     return _OK;
 }
@@ -328,6 +331,16 @@ int sspipe_feed(sspipe_ctx_t* ctx, int in_id, const char* buf, int len) {
         _LOG_E("sspipe_feed: ssbuff_append failed");
         return _ERR;
     }
+
+    // if (!pipe->is_activity) {
+    //     if (pipe->ctime + ctx->connect_timeout < mstime()) {
+    //         _LOG_E("pipe timeout id:%d", pipe->in_id);
+    //         sspipe_unbind(ctx, pipe->in_id);
+    //         return _ERR;
+    //     }
+    //     return _OK;
+    // }
+
     int ret = _OK;
     if (pipe->type == SSPIPE_TYPE_UNPACK) {
         ret = unpack(ctx, pipe);

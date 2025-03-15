@@ -78,8 +78,9 @@ static void write_cb(EV_P_ ev_io* w, int revents) {
     if (!sspipe_is_activity(ssp_server->sspipe_ctx, fd))
     {
         sspipe_set_activity(ssp_server->sspipe_ctx, fd, 1);
-        ev_io_stop(ssp_server->loop, w_watcher);
-        return;
+        _LOG("write_cb activity fd: %d", fd);
+        // ev_io_stop(ssp_server->loop, w_watcher);
+        // return;
     }
     
 
@@ -105,11 +106,12 @@ static void write_cb(EV_P_ ev_io* w, int revents) {
         return;
     }
     assert(sent == out->len);
+    out->len=0;
     ev_io_stop(ssp_server->loop, w_watcher);
     _LOG("write_cb send ok. fd: %d", fd);
 }
 
-int sspipe_output_cb(int id, void* user) {
+static int sspipe_output_cb(int id, void* user) {
     ssp_server_t* ssp_server = (ssp_server_t*)user;
     assert(ssp_server);
     ev_io* w_watcher = sspipe_get_write_watcher(ssp_server->sspipe_ctx, id);
@@ -147,7 +149,7 @@ static void read_cb(EV_P_ ev_io* w, int revents) {
         if (len < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 _LOG("read EAGAIN");
-                return;
+                break;
             } else {
                 perror("server read failed");
                 ret = _ERR;
