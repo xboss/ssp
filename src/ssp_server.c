@@ -139,14 +139,14 @@ static void read_cb(EV_P_ ev_io* w, int revents) {
                 // _LOG("read EAGAIN");
                 break;
             } else {
-                _LOG_E("server read failed error: %d", errno);
+                _LOG_E("server read failed fd: %d error: %d", fd, errno);
                 ret = _ERR;
                 break;
             }
         }
         if (len == 0) {
             // close
-            _LOG("server read EOF");
+            _LOG("server read EOF. fd:%d", fd);
             ret = _ERR;
             break;
         }
