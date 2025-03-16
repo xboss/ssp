@@ -2,8 +2,7 @@
 Stupid Secret Pipeline
 
 ## TODO:
-* [x] Optimize pack send
-* [x] Simple handshake 
-* [ ] Manage all threads
+* [ ] decouple connection and pipe 
+* [ ] Multi threads
 * [ ] All parameters are configurable
 * [ ] Support IPv6
