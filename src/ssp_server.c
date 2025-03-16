@@ -62,7 +62,7 @@ static int send_all(int fd, const char* buf, int len) {
             }
         }
         if (s == 0) {
-            _LOG_E("server send fd: %d len: %d sent: %d s: %d error: %d", fd, len, sent, s, errno);
+            _LOG("server send fd: %d len: %d sent: %d s: %d error: %d", fd, len, sent, s, errno);
             // sent = _ERR;
             break;
         }
