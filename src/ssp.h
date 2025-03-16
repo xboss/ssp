@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ev.h>
+#include <sys/time.h>
 
 #include "crypto.h"
 #include "ssbuff.h"

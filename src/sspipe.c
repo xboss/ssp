@@ -1,20 +1,20 @@
 #include "sspipe.h"
 
 #include <arpa/inet.h>
-#include <sys/time.h>
+
 
 typedef struct {
     int in_id;
     int out_id;
-    int is_activity;
+    // int is_activity;
     sspipe_type_t type;
     ssbuff_t* in_buf;
     ssbuff_t* out_buf;
     sspipe_output_cb_t output_cb;
     void* user;
-    ev_io* read_watcher;
-    ev_io* write_watcher;
-    uint64_t ctime;
+    // ev_io* read_watcher;
+    // ev_io* write_watcher;
+    // uint64_t ctime;
     UT_hash_handle hh;
 } sspipe_t;
 
@@ -25,15 +25,10 @@ struct sspipe_ctx_s {
     char* pkt_buf;
     int max_pkt_buf_size;
     struct ev_loop* loop;
-    int connect_timeout;
+    // int connect_timeout;
 };
 
-uint64_t mstime() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    uint64_t millisecond = (tv.tv_sec * 1000000l + tv.tv_usec) / 1000l;
-    return millisecond;
-}
+
 
 inline static sspipe_t* new_sspipe(int in_id) {
     sspipe_t* pipe = (sspipe_t*)calloc(1, sizeof(sspipe_t));
@@ -53,7 +48,7 @@ inline static sspipe_t* new_sspipe(int in_id) {
         _LOG_E("new_pipe: ssbuff_init failed");
         return NULL;
     }
-    pipe->ctime = mstime();
+    // pipe->ctime = mstime();
     return pipe;
 }
 
@@ -72,16 +67,16 @@ inline static void free_sspipe(sspipe_ctx_t* ctx, sspipe_t* pipe) {
     }
     pipe->in_id = 0;
     pipe->out_id = 0;
-    if (pipe->read_watcher) {
-        ev_io_stop(ctx->loop, pipe->read_watcher);
-        free(pipe->read_watcher);
-        pipe->read_watcher = NULL;
-    }
-    if (pipe->write_watcher) {
-        ev_io_stop(ctx->loop, pipe->write_watcher);
-        free(pipe->write_watcher);
-        pipe->write_watcher = NULL;
-    }
+    // if (pipe->read_watcher) {
+    //     ev_io_stop(ctx->loop, pipe->read_watcher);
+    //     free(pipe->read_watcher);
+    //     pipe->read_watcher = NULL;
+    // }
+    // if (pipe->write_watcher) {
+    //     ev_io_stop(ctx->loop, pipe->write_watcher);
+    //     free(pipe->write_watcher);
+    //     pipe->write_watcher = NULL;
+    // }
     free(pipe);
 }
 
@@ -141,17 +136,17 @@ static int pack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
             memmove(pipe->in_buf->buf, pipe->in_buf->buf + (pipe->in_buf->len - remaining), remaining);
         }
         pipe->in_buf->len = remaining;
-        if (out_pipe->output_cb && out_pipe->is_activity) {
+        if (out_pipe->output_cb) {
             if (out_pipe->output_cb(out_pipe->in_id, out_pipe->user) != _OK) {
                 _LOG_E("pack output_cb failed");
                 return _ERR;
             }
         }
-        if (!out_pipe->is_activity && out_pipe->ctime + ctx->connect_timeout < mstime()) {
-            _LOG_E("pipe timeout");
-            // sspipe_unbind(ctx, out_pipe->in_id);
-            return _ERR;
-        }
+        // if (!out_pipe->is_activity && out_pipe->ctime + ctx->connect_timeout < mstime()) {
+        //     _LOG_E("pipe timeout");
+        //     // sspipe_unbind(ctx, out_pipe->in_id);
+        //     return _ERR;
+        // }
     }
     return _OK;
 }
@@ -199,17 +194,17 @@ static int unpack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
         }
         pipe->in_buf->len = remaining;
 
-        if (out_pipe->output_cb && out_pipe->is_activity) {
+        if (out_pipe->output_cb) {
             if (out_pipe->output_cb(out_pipe->in_id, out_pipe->user) != _OK) {
                 _LOG_E("unpack output_cb failed");
                 return _ERR;
             }
         }
-        if (!out_pipe->is_activity && out_pipe->ctime + ctx->connect_timeout < mstime()) {
-            _LOG_E("pipe timeout");
-            // sspipe_unbind(ctx, out_pipe->in_id);
-            return _ERR;
-        }
+        // if (!out_pipe->is_activity && out_pipe->ctime + ctx->connect_timeout < mstime()) {
+        //     _LOG_E("pipe timeout");
+        //     // sspipe_unbind(ctx, out_pipe->in_id);
+        //     return _ERR;
+        // }
     }
     return _OK;
 }
@@ -226,6 +221,14 @@ int sspipe_get_bind_id(sspipe_ctx_t* ctx, int id) {
     return -1;
 }
 
+void* sspipe_get_userdata(sspipe_ctx_t* ctx, int in_id) {
+    sspipe_t* pipe = get_sspipe(ctx, in_id);
+    if (pipe) {
+        return pipe->user;
+    }
+    return NULL;
+}
+
 int sspipe_new(sspipe_ctx_t* ctx, int in_id, sspipe_type_t type, int is_activity, sspipe_output_cb_t output_cb, void* user) {
     if (!ctx || in_id < 0) {
         return _ERR;
@@ -238,32 +241,32 @@ int sspipe_new(sspipe_ctx_t* ctx, int in_id, sspipe_type_t type, int is_activity
     pipe->type = type;
     pipe->output_cb = output_cb;
     pipe->user = user;
-    pipe->is_activity = is_activity;
-    pipe->read_watcher = (ev_io*)calloc(1, sizeof(ev_io));
-    if (!pipe->read_watcher) {
-        free_sspipe(ctx, pipe);
-        return _ERR;
-    }
-    pipe->write_watcher = (ev_io*)calloc(1, sizeof(ev_io));
-    if (!pipe->write_watcher) {
-        free_sspipe(ctx, pipe);
-        return _ERR;
-    }
+    // pipe->is_activity = is_activity;
+    // pipe->read_watcher = (ev_io*)calloc(1, sizeof(ev_io));
+    // if (!pipe->read_watcher) {
+    //     free_sspipe(ctx, pipe);
+    //     return _ERR;
+    // }
+    // pipe->write_watcher = (ev_io*)calloc(1, sizeof(ev_io));
+    // if (!pipe->write_watcher) {
+    //     free_sspipe(ctx, pipe);
+    //     return _ERR;
+    // }
     HASH_ADD_INT(ctx->pipe_index, in_id, pipe);
     return _OK;
 }
 
-ev_io* sspipe_get_read_watcher(sspipe_ctx_t* ctx, int in_id) {
-    sspipe_t* pipe = get_sspipe(ctx, in_id);
-    if (!pipe) return NULL;
-    return pipe->read_watcher;
-}
+// ev_io* sspipe_get_read_watcher(sspipe_ctx_t* ctx, int in_id) {
+//     sspipe_t* pipe = get_sspipe(ctx, in_id);
+//     if (!pipe) return NULL;
+//     return pipe->read_watcher;
+// }
 
-ev_io* sspipe_get_write_watcher(sspipe_ctx_t* ctx, int in_id) {
-    sspipe_t* pipe = get_sspipe(ctx, in_id);
-    if (!pipe) return NULL;
-    return pipe->write_watcher;
-}
+// ev_io* sspipe_get_write_watcher(sspipe_ctx_t* ctx, int in_id) {
+//     sspipe_t* pipe = get_sspipe(ctx, in_id);
+//     if (!pipe) return NULL;
+//     return pipe->write_watcher;
+// }
 
 // int sspipe_join(sspipe_ctx_t* ctx, int in_id, int out_id, sspipe_type_t type, sspipe_output_cb_t output_cb, void* user) {
 //     sspipe_t* pipe = NULL;
@@ -320,18 +323,18 @@ int sspipe_unbind(sspipe_ctx_t* ctx, int in_id) {
     return _OK;
 }
 
-int sspipe_is_activity(sspipe_ctx_t* ctx, int in_id) {
-    sspipe_t* pipe = get_sspipe(ctx, in_id);
-    if (!pipe) return 0;
-    return pipe->is_activity;
-}
+// int sspipe_is_activity(sspipe_ctx_t* ctx, int in_id) {
+//     sspipe_t* pipe = get_sspipe(ctx, in_id);
+//     if (!pipe) return 0;
+//     return pipe->is_activity;
+// }
 
-int sspipe_set_activity(sspipe_ctx_t* ctx, int in_id, int is_activity) {
-    sspipe_t* pipe = get_sspipe(ctx, in_id);
-    if (!pipe) return _ERR;
-    pipe->is_activity = 1;
-    return _OK;
-}
+// int sspipe_set_activity(sspipe_ctx_t* ctx, int in_id, int is_activity) {
+//     sspipe_t* pipe = get_sspipe(ctx, in_id);
+//     if (!pipe) return _ERR;
+//     pipe->is_activity = 1;
+//     return _OK;
+// }
 
 int sspipe_feed(sspipe_ctx_t* ctx, int in_id, const char* buf, int len) {
     sspipe_t* pipe = get_sspipe(ctx, in_id);
@@ -365,14 +368,14 @@ ssbuff_t* sspipe_take(sspipe_ctx_t* ctx, int id) {
     return pipe->out_buf;
 }
 
-sspipe_ctx_t* sspipe_init(struct ev_loop* loop, const char* key, int key_len, const char* iv, int iv_len, int connect_timeout, int max_pkt_buf_size) {
+sspipe_ctx_t* sspipe_init(struct ev_loop* loop, const char* key, int key_len, const char* iv, int iv_len, int max_pkt_buf_size) {
     sspipe_ctx_t* ctx = (sspipe_ctx_t*)calloc(1, sizeof(sspipe_ctx_t));
     if (!ctx) {
         _LOG_E("sspipe_init: calloc failed");
         return NULL;
     }
     ctx->loop = loop;
-    ctx->connect_timeout = connect_timeout;
+    // ctx->connect_timeout = connect_timeout;
     ctx->pipe_index = NULL;
     if (key) {
         ctx->key = (unsigned char*)calloc(1, key_len);
@@ -442,7 +445,7 @@ void sspipe_print_info(sspipe_ctx_t* ctx) {
     _LOG("  Key: %s", ctx->key);
     _LOG("  IV: %s", ctx->iv);
     _LOG("  Max packet buf: %d", ctx->max_pkt_buf_size);
-    _LOG("  Connect timeout: %dms", ctx->connect_timeout);
+    // _LOG("  Connect timeout: %dms", ctx->connect_timeout);
     _LOG("---------------------------------");
     int cnt = HASH_COUNT(ctx->pipe_index);
     assert(cnt % 2 == 0);
@@ -452,10 +455,10 @@ void sspipe_print_info(sspipe_ctx_t* ctx) {
         HASH_ITER(hh, ctx->pipe_index, pipe, tmp) {
             _LOG("  [Pipe %d] -> %d", pipe->in_id, pipe->out_id);
             _LOG("    Type: %s", pipe->type == SSPIPE_TYPE_PACK ? "PACK" : "UNPACK");
-            _LOG("    Activity: %d", pipe->is_activity);
+            // _LOG("    Activity: %d", pipe->is_activity);
             _LOG("    InBuf: %d/%d bytes", pipe->in_buf ? pipe->in_buf->len : -1, pipe->in_buf ? pipe->in_buf->cap : -1);
             _LOG("    OutBuf: %d/%d bytes", pipe->out_buf ? pipe->out_buf->len : -1, pipe->out_buf ? pipe->out_buf->cap : -1);
-            _LOG("    Created: %lums ago", mstime() - pipe->ctime);
+            // _LOG("    Created: %lums ago", mstime() - pipe->ctime);
         }
     } else {
         _LOG("  No active pipes");
