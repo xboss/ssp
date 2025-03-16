@@ -98,13 +98,13 @@ static void write_cb(EV_P_ ev_io* w, int revents) {
 
     int sent = send_all(fd, out->buf, out->len);
     if (sent == _ERR) {
-        _LOG("write_cb close fd: %d", fd);
+        _LOG("write_cb close fd: %d sent: %d", fd, sent);
         close_conn(ssp_server, fd);
         return;
     }
     if (sent < out->len) {
         // pending
-        _LOG("write_cb pending");
+        _LOG("write_cb pending fd: %d sent: %d", fd, sent);
         memmove(out->buf, out->buf + sent, out->len - sent);
         out->len -= sent;
         return;
@@ -112,7 +112,7 @@ static void write_cb(EV_P_ ev_io* w, int revents) {
     assert(sent == out->len);
     out->len = 0;
     ev_io_stop(ssp_server->loop, w_watcher);
-    _LOG("write_cb send ok. fd: %d", fd);
+    _LOG("write_cb send ok. fd: %d sent: %d", fd, sent);
 }
 
 static int sspipe_output_cb(int id, void* user) {
