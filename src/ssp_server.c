@@ -199,8 +199,11 @@ static int sspipe_output_cb(int id, void* user) {
 
 static void read_cb(EV_P_ ev_io* w, int revents) {
     assert(revents & EV_READ);
-    ssp_server_t* ssp_server = (ssp_server_t*)w->data;
+    ssp_conn_t * conn = (ssp_conn_t *)w->data;
+    assert(conn);
+    ssp_server_t* ssp_server = conn->ssp_server;
     assert(ssp_server);
+    
     int fd = w->fd;
     char buf[SSP_RECV_BUF_SIZE];
     int len = read(fd, buf, sizeof(buf));
@@ -347,6 +350,7 @@ static void accept_cb(EV_P_ ev_io* w, int revents) {
         sspipe_del(ssp_server->sspipe_ctx, back_fd);
         return;
     }
+    sspipe_get_bind_id(ssp_server->sspipe_ctx, front_fd);
 }
 
 ////////////////////////////////

@@ -4,7 +4,7 @@
 #include "ssp.h"
 
 #define SSP_PACKET_HEAD_LEN 4
-#define SSP_MAX_PAYLOAD_LEN (1024 * 2)
+#define SSP_MAX_PAYLOAD_LEN (1024 * 4)
 #define SSP_RECV_BUF_SIZE (SSP_MAX_PAYLOAD_LEN + SSP_PACKET_HEAD_LEN) * 5
 
 typedef enum { SSPIPE_TYPE_UNPACK = 0, SSPIPE_TYPE_PACK } sspipe_type_t;
