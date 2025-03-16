@@ -56,7 +56,7 @@ static int send_all(int fd, const char* buf, int len) {
                 _LOG("send EAGAIN");
                 break;
             } else {
-                _LOG_E("server send failed");
+                _LOG_E("server send failed fd: %d error: %d", fd, errno);
                 sent = _ERR;
                 break;
             }
