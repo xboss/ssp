@@ -28,9 +28,9 @@ target_link_libraries(ssplibev ev)
 
 
 ############# static #############
-add_executable(ssplibev_static ${SOURCE_FILES})
-target_link_libraries(ssplibev_static ssl -static)
-target_link_libraries(ssplibev_static crypto -static)
-target_link_libraries(ssplibev_static ev -static)
+# add_executable(ssplibev_static ${SOURCE_FILES})
+# target_link_libraries(ssplibev_static ssl -static)
+# target_link_libraries(ssplibev_static crypto -static)
+# target_link_libraries(ssplibev_static ev -static)
 
 #cmake -DCMAKE_BUILD_TYPE=Debug ..
