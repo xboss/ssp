@@ -21,10 +21,15 @@ src/ssp_server.c
 
 
 ############# ssp #############
-add_executable(ssplibev ${SOURCE_FILES})
-target_link_libraries(ssplibev ssl)
-target_link_libraries(ssplibev crypto)
-target_link_libraries(ssplibev ev)
+add_executable(ssp ${SOURCE_FILES})
+target_link_libraries(ssp ssl)
+target_link_libraries(ssp crypto)
+target_link_libraries(ssp ev)
+
+# add_executable(ssplibev ${SOURCE_FILES})
+# target_link_libraries(ssplibev ssl)
+# target_link_libraries(ssplibev crypto)
+# target_link_libraries(ssplibev ev)
 
 
 ############# static #############
