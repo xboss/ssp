@@ -2,19 +2,14 @@
 
 #include <arpa/inet.h>
 
-
 typedef struct {
     int in_id;
     int out_id;
-    // int is_activity;
     sspipe_type_t type;
     ssbuff_t* in_buf;
     ssbuff_t* out_buf;
     sspipe_output_cb_t output_cb;
     void* user;
-    // ev_io* read_watcher;
-    // ev_io* write_watcher;
-    // uint64_t ctime;
     UT_hash_handle hh;
 } sspipe_t;
 
@@ -25,10 +20,7 @@ struct sspipe_ctx_s {
     char* pkt_buf;
     int max_pkt_buf_size;
     struct ev_loop* loop;
-    // int connect_timeout;
 };
-
-
 
 inline static sspipe_t* new_sspipe(int in_id) {
     sspipe_t* pipe = (sspipe_t*)calloc(1, sizeof(sspipe_t));
@@ -48,7 +40,6 @@ inline static sspipe_t* new_sspipe(int in_id) {
         _LOG_E("new_pipe: ssbuff_init failed");
         return NULL;
     }
-    // pipe->ctime = mstime();
     return pipe;
 }
 
@@ -67,16 +58,6 @@ inline static void free_sspipe(sspipe_ctx_t* ctx, sspipe_t* pipe) {
     }
     pipe->in_id = 0;
     pipe->out_id = 0;
-    // if (pipe->read_watcher) {
-    //     ev_io_stop(ctx->loop, pipe->read_watcher);
-    //     free(pipe->read_watcher);
-    //     pipe->read_watcher = NULL;
-    // }
-    // if (pipe->write_watcher) {
-    //     ev_io_stop(ctx->loop, pipe->write_watcher);
-    //     free(pipe->write_watcher);
-    //     pipe->write_watcher = NULL;
-    // }
     free(pipe);
 }
 
@@ -109,8 +90,9 @@ static int pack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
         pkt_len += SSP_PACKET_HEAD_LEN;
         // encrypt
         if (ctx->key && ctx->iv) {
-            if (crypto_encrypt(ctx->key, ctx->iv, (const unsigned char*)pipe->in_buf->buf + (pipe->in_buf->len - remaining), payload_len, (unsigned char*)ctx->pkt_buf + SSP_PACKET_HEAD_LEN,
-                               &cipher_len) != 0) {
+            if (crypto_encrypt(ctx->key, ctx->iv,
+                               (const unsigned char*)pipe->in_buf->buf + (pipe->in_buf->len - remaining), payload_len,
+                               (unsigned char*)ctx->pkt_buf + SSP_PACKET_HEAD_LEN, &cipher_len) != 0) {
                 _LOG_E("pack crypto_encrypt failed");
                 return _ERR;
             }
@@ -118,10 +100,10 @@ static int pack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
             assert(cipher_len == payload_len);
             pkt_len += cipher_len;
         } else {
-            memcpy(ctx->pkt_buf + SSP_PACKET_HEAD_LEN, pipe->in_buf->buf + (pipe->in_buf->len - remaining), payload_len);
+            memcpy(ctx->pkt_buf + SSP_PACKET_HEAD_LEN, pipe->in_buf->buf + (pipe->in_buf->len - remaining),
+                   payload_len);
             pkt_len += payload_len;
         }
-
         sspipe_t* out_pipe = get_sspipe(ctx, pipe->out_id);
         if (!out_pipe) {
             _LOG_E("pack get_sspipe out_id:%d failed", pipe->out_id);
@@ -142,11 +124,6 @@ static int pack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
                 return _ERR;
             }
         }
-        // if (!out_pipe->is_activity && out_pipe->ctime + ctx->connect_timeout < mstime()) {
-        //     _LOG_E("pipe timeout");
-        //     // sspipe_unbind(ctx, out_pipe->in_id);
-        //     return _ERR;
-        // }
     }
     return _OK;
 }
@@ -166,7 +143,8 @@ static int unpack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
         if (pipe->in_buf->len < payload_len + SSP_PACKET_HEAD_LEN) return _OK;
         // decrypt
         if (ctx->key && ctx->iv) {
-            if (crypto_decrypt(ctx->key, ctx->iv, (const unsigned char*)pipe->in_buf->buf + SSP_PACKET_HEAD_LEN, payload_len, (unsigned char*)ctx->pkt_buf, &cipher_len) != 0) {
+            if (crypto_decrypt(ctx->key, ctx->iv, (const unsigned char*)pipe->in_buf->buf + SSP_PACKET_HEAD_LEN,
+                               payload_len, (unsigned char*)ctx->pkt_buf, &cipher_len) != 0) {
                 _LOG_E("unpack crypto_decrypt failed");
                 return _ERR;
             }
@@ -177,7 +155,6 @@ static int unpack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
             memcpy(ctx->pkt_buf, pipe->in_buf->buf + SSP_PACKET_HEAD_LEN, payload_len);
             pkt_len += payload_len;
         }
-
         sspipe_t* out_pipe = get_sspipe(ctx, pipe->out_id);
         if (!out_pipe) {
             _LOG_E("pack get_sspipe out_id:%d failed", pipe->out_id);
@@ -193,18 +170,12 @@ static int unpack(sspipe_ctx_t* ctx, sspipe_t* pipe) {
             memmove(pipe->in_buf->buf, pipe->in_buf->buf + payload_len + SSP_PACKET_HEAD_LEN, remaining);
         }
         pipe->in_buf->len = remaining;
-
         if (out_pipe->output_cb) {
             if (out_pipe->output_cb(out_pipe->in_id, out_pipe->user) != _OK) {
                 _LOG_E("unpack output_cb failed");
                 return _ERR;
             }
         }
-        // if (!out_pipe->is_activity && out_pipe->ctime + ctx->connect_timeout < mstime()) {
-        //     _LOG_E("pipe timeout");
-        //     // sspipe_unbind(ctx, out_pipe->in_id);
-        //     return _ERR;
-        // }
     }
     return _OK;
 }
@@ -229,7 +200,8 @@ void* sspipe_get_userdata(sspipe_ctx_t* ctx, int in_id) {
     return NULL;
 }
 
-int sspipe_new(sspipe_ctx_t* ctx, int in_id, sspipe_type_t type, int is_activity, sspipe_output_cb_t output_cb, void* user) {
+int sspipe_new(sspipe_ctx_t* ctx, int in_id, sspipe_type_t type, int is_activity, sspipe_output_cb_t output_cb,
+               void* user) {
     if (!ctx || in_id < 0) {
         return _ERR;
     }
@@ -241,45 +213,9 @@ int sspipe_new(sspipe_ctx_t* ctx, int in_id, sspipe_type_t type, int is_activity
     pipe->type = type;
     pipe->output_cb = output_cb;
     pipe->user = user;
-    // pipe->is_activity = is_activity;
-    // pipe->read_watcher = (ev_io*)calloc(1, sizeof(ev_io));
-    // if (!pipe->read_watcher) {
-    //     free_sspipe(ctx, pipe);
-    //     return _ERR;
-    // }
-    // pipe->write_watcher = (ev_io*)calloc(1, sizeof(ev_io));
-    // if (!pipe->write_watcher) {
-    //     free_sspipe(ctx, pipe);
-    //     return _ERR;
-    // }
     HASH_ADD_INT(ctx->pipe_index, in_id, pipe);
     return _OK;
 }
-
-// ev_io* sspipe_get_read_watcher(sspipe_ctx_t* ctx, int in_id) {
-//     sspipe_t* pipe = get_sspipe(ctx, in_id);
-//     if (!pipe) return NULL;
-//     return pipe->read_watcher;
-// }
-
-// ev_io* sspipe_get_write_watcher(sspipe_ctx_t* ctx, int in_id) {
-//     sspipe_t* pipe = get_sspipe(ctx, in_id);
-//     if (!pipe) return NULL;
-//     return pipe->write_watcher;
-// }
-
-// int sspipe_join(sspipe_ctx_t* ctx, int in_id, int out_id, sspipe_type_t type, sspipe_output_cb_t output_cb, void* user) {
-//     sspipe_t* pipe = NULL;
-//     HASH_FIND_INT(ctx->pipe_index, &in_id, pipe);
-//     if (!pipe) {
-//         return _ERR;
-//     }
-//     pipe->out_id = out_id;
-//     pipe->output_cb = output_cb;
-//     pipe->user = user;
-//     pipe->type = type;
-//     return _OK;
-// }
 
 void sspipe_del(sspipe_ctx_t* ctx, int in_id) {
     sspipe_t* pipe = get_sspipe(ctx, in_id);
@@ -323,19 +259,6 @@ int sspipe_unbind(sspipe_ctx_t* ctx, int in_id) {
     return _OK;
 }
 
-// int sspipe_is_activity(sspipe_ctx_t* ctx, int in_id) {
-//     sspipe_t* pipe = get_sspipe(ctx, in_id);
-//     if (!pipe) return 0;
-//     return pipe->is_activity;
-// }
-
-// int sspipe_set_activity(sspipe_ctx_t* ctx, int in_id, int is_activity) {
-//     sspipe_t* pipe = get_sspipe(ctx, in_id);
-//     if (!pipe) return _ERR;
-//     pipe->is_activity = 1;
-//     return _OK;
-// }
-
 int sspipe_feed(sspipe_ctx_t* ctx, int in_id, const char* buf, int len) {
     sspipe_t* pipe = get_sspipe(ctx, in_id);
     if (!pipe) {
@@ -368,7 +291,8 @@ ssbuff_t* sspipe_take(sspipe_ctx_t* ctx, int id) {
     return pipe->out_buf;
 }
 
-sspipe_ctx_t* sspipe_init(struct ev_loop* loop, const char* key, int key_len, const char* iv, int iv_len, int max_pkt_buf_size) {
+sspipe_ctx_t* sspipe_init(struct ev_loop* loop, const char* key, int key_len, const char* iv, int iv_len,
+                          int max_pkt_buf_size) {
     sspipe_ctx_t* ctx = (sspipe_ctx_t*)calloc(1, sizeof(sspipe_ctx_t));
     if (!ctx) {
         _LOG_E("sspipe_init: calloc failed");
@@ -445,7 +369,6 @@ void sspipe_print_info(sspipe_ctx_t* ctx) {
     _LOG("  Key: %s", ctx->key);
     _LOG("  IV: %s", ctx->iv);
     _LOG("  Max packet buf: %d", ctx->max_pkt_buf_size);
-    // _LOG("  Connect timeout: %dms", ctx->connect_timeout);
     _LOG("---------------------------------");
     int cnt = HASH_COUNT(ctx->pipe_index);
     assert(cnt % 2 == 0);
@@ -456,9 +379,10 @@ void sspipe_print_info(sspipe_ctx_t* ctx) {
             _LOG("  [Pipe %d] -> %d", pipe->in_id, pipe->out_id);
             _LOG("    Type: %s", pipe->type == SSPIPE_TYPE_PACK ? "PACK" : "UNPACK");
             // _LOG("    Activity: %d", pipe->is_activity);
-            _LOG("    InBuf: %d/%d bytes", pipe->in_buf ? pipe->in_buf->len : -1, pipe->in_buf ? pipe->in_buf->cap : -1);
-            _LOG("    OutBuf: %d/%d bytes", pipe->out_buf ? pipe->out_buf->len : -1, pipe->out_buf ? pipe->out_buf->cap : -1);
-            // _LOG("    Created: %lums ago", mstime() - pipe->ctime);
+            _LOG("    InBuf: %d/%d bytes", pipe->in_buf ? pipe->in_buf->len : -1,
+                 pipe->in_buf ? pipe->in_buf->cap : -1);
+            _LOG("    OutBuf: %d/%d bytes", pipe->out_buf ? pipe->out_buf->len : -1,
+                 pipe->out_buf ? pipe->out_buf->cap : -1);
         }
     } else {
         _LOG("  No active pipes");

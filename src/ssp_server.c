@@ -37,7 +37,7 @@ inline static int set_nonblocking(int fd) {
     return _OK;
 }
 
-inline static  int setreuseaddr(int fd) {
+inline static int setreuseaddr(int fd) {
     int reuse = 1;
     if (-1 == setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse))) {
         perror("set reuse addr error");
@@ -46,7 +46,7 @@ inline static  int setreuseaddr(int fd) {
     return _OK;
 }
 
-inline static  int set_nodelay(int fd) {
+inline static int set_nodelay(int fd) {
     int opt = 1;
     if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char*)&opt, sizeof(opt)) < 0) {
         perror("Failed to set TCP_NODELAY");
@@ -56,7 +56,7 @@ inline static  int set_nodelay(int fd) {
 }
 
 static ssp_conn_t* new_conn(ssp_server_t* ssp_server, int fd, int is_activity) {
-    ssp_conn_t* conn = (ssp_conn_t*)calloc(1,sizeof(ssp_conn_t));
+    ssp_conn_t* conn = (ssp_conn_t*)calloc(1, sizeof(ssp_conn_t));
     if (!conn) {
         _LOG_E("alloc error.");
         return NULL;
@@ -100,10 +100,10 @@ static void free_conn(ssp_conn_t* conn) {
 
 static void close_conn(ssp_server_t* ssp_server, int fd) {
     int fd2 = sspipe_get_bind_id(ssp_server->sspipe_ctx, fd);
-    assert(fd2 > 0); 
-    ssp_conn_t * conn = (ssp_conn_t *)sspipe_get_userdata( ssp_server->sspipe_ctx, fd);
+    assert(fd2 > 0);
+    ssp_conn_t* conn = (ssp_conn_t*)sspipe_get_userdata(ssp_server->sspipe_ctx, fd);
     assert(conn);
-    ssp_conn_t * conn2 = (ssp_conn_t *)sspipe_get_userdata( ssp_server->sspipe_ctx, fd2);
+    ssp_conn_t* conn2 = (ssp_conn_t*)sspipe_get_userdata(ssp_server->sspipe_ctx, fd2);
     assert(conn2);
     sspipe_unbind(ssp_server->sspipe_ctx, fd);
     close(fd);
@@ -143,7 +143,7 @@ static int send_all(int fd, const char* buf, int len) {
 
 static void write_cb(EV_P_ ev_io* w, int revents) {
     assert(revents & EV_WRITE);
-    ssp_conn_t * conn = (ssp_conn_t *)w->data;
+    ssp_conn_t* conn = (ssp_conn_t*)w->data;
     assert(conn);
     ssp_server_t* ssp_server = conn->ssp_server;
     assert(ssp_server);
@@ -181,11 +181,10 @@ static void write_cb(EV_P_ ev_io* w, int revents) {
 
 static int sspipe_output_cb(int id, void* user) {
     _LOG("sspipe_output_cb id: %d", id);
-    ssp_conn_t * conn = (ssp_conn_t *)user;
+    ssp_conn_t* conn = (ssp_conn_t*)user;
     assert(conn);
     ssp_server_t* ssp_server = conn->ssp_server;
     assert(ssp_server);
-    
     if (!conn->is_activity && conn->ctime + SSP_CONNECT_TIMEOUT < mstime()) { /* TODO: config timeout */
         _LOG_E("connect timeout");
         return _ERR;
@@ -193,17 +192,15 @@ static int sspipe_output_cb(int id, void* user) {
     ev_io* w_watcher = conn->write_watcher;
     assert(w_watcher);
     ev_io_start(ssp_server->loop, w_watcher);
-
     return _OK;
 }
 
 static void read_cb(EV_P_ ev_io* w, int revents) {
     assert(revents & EV_READ);
-    ssp_conn_t * conn = (ssp_conn_t *)w->data;
+    ssp_conn_t* conn = (ssp_conn_t*)w->data;
     assert(conn);
     ssp_server_t* ssp_server = conn->ssp_server;
     assert(ssp_server);
-    
     int fd = w->fd;
     char buf[SSP_RECV_BUF_SIZE];
     int len = read(fd, buf, sizeof(buf));
@@ -241,7 +238,6 @@ static void accept_cb(EV_P_ ev_io* w, int revents) {
     assert(revents & EV_READ);
     ssp_server_t* ssp_server = (ssp_server_t*)w->data;
     assert(ssp_server);
-
     struct sockaddr_in front_addr;
     socklen_t len = sizeof(front_addr);
     int front_fd = accept(w->fd, (struct sockaddr*)&front_addr, &len);
@@ -256,7 +252,6 @@ static void accept_cb(EV_P_ ev_io* w, int revents) {
     }
     set_nonblocking(front_fd);
     set_nodelay(front_fd);
-
     // connect to target server
     int back_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (back_fd < 0) {
@@ -279,24 +274,21 @@ static void accept_cb(EV_P_ ev_io* w, int revents) {
             return;
         }
     }
-
     _LOG("Connected to server at %s:%d", ssp_server->conf->target_ip, ssp_server->conf->target_port);
     _LOG("front_fd: %d backend_fd: %d", front_fd, back_fd);
-
-    ssp_conn_t *front_conn = new_conn(ssp_server, front_fd, 1);
+    ssp_conn_t* front_conn = new_conn(ssp_server, front_fd, 1);
     if (!front_conn) {
         close(front_fd);
         close(back_fd);
         return;
     }
-    ssp_conn_t *back_conn = new_conn(ssp_server, back_fd, 0);
+    ssp_conn_t* back_conn = new_conn(ssp_server, back_fd, 0);
     if (!back_conn) {
         close(front_fd);
         close(back_fd);
         free_conn(front_conn);
         return;
     }
-
     sspipe_type_t ssp_type = SSPIPE_TYPE_UNPACK;
     if (ssp_server->conf->mode == SSP_MODE_LOCAL) {
         ssp_type = SSPIPE_TYPE_PACK;
@@ -317,26 +309,18 @@ static void accept_cb(EV_P_ ev_io* w, int revents) {
         free_conn(back_conn);
         return;
     }
-    // ev_io* back_r_watcher = sspipe_get_read_watcher(ssp_server->sspipe_ctx, back_fd);
-    // assert(back_r_watcher);
     ev_io_init(back_conn->read_watcher, read_cb, back_fd, EV_READ);
     back_conn->read_watcher->data = back_conn;
     ev_io_start(loop, back_conn->read_watcher);
 
-    // ev_io* back_w_watcher = sspipe_get_write_watcher(ssp_server->sspipe_ctx, back_fd);
-    // assert(back_w_watcher);
     ev_io_init(back_conn->write_watcher, write_cb, back_fd, EV_WRITE);
     back_conn->write_watcher->data = back_conn;
     ev_io_start(loop, back_conn->write_watcher);
 
-    // ev_io* front_r_watcher = sspipe_get_read_watcher(ssp_server->sspipe_ctx, front_fd);
-    // assert(front_r_watcher);
     ev_io_init(front_conn->read_watcher, read_cb, front_fd, EV_READ);
     front_conn->read_watcher->data = front_conn;
     ev_io_start(loop, front_conn->read_watcher);
 
-    // ev_io* front_w_watcher = sspipe_get_write_watcher(ssp_server->sspipe_ctx, front_fd);
-    // assert(front_w_watcher);
     ev_io_init(front_conn->write_watcher, write_cb, front_fd, EV_WRITE);
     front_conn->write_watcher->data = front_conn;
 
@@ -371,7 +355,8 @@ ssp_server_t* ssp_server_init(struct ev_loop* loop, ssconfig_t* conf) {
     }
     ssp_server->conf = conf;
     ssp_server->loop = loop;
-    ssp_server->sspipe_ctx = sspipe_init(loop, (const char*)conf->key, AES_128_KEY_SIZE + 1, (const char*)conf->iv, AES_BLOCK_SIZE + 1, SSP_RECV_BUF_SIZE);
+    ssp_server->sspipe_ctx = sspipe_init(loop, (const char*)conf->key, AES_128_KEY_SIZE + 1, (const char*)conf->iv,
+                                         AES_BLOCK_SIZE + 1, SSP_RECV_BUF_SIZE);
     if (ssp_server->sspipe_ctx == NULL) {
         _LOG_E("sspipe_init: sspipe_init failed");
         ssp_server_free(ssp_server);
@@ -437,7 +422,6 @@ void ssp_server_free(ssp_server_t* ssp_server) {
         free(ssp_server->accept_watcher);
         ssp_server->accept_watcher = NULL;
     }
-
     if (ssp_server->sspipe_ctx) {
         sspipe_free(ssp_server->sspipe_ctx);
         ssp_server->sspipe_ctx = NULL;
