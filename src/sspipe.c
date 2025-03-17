@@ -192,6 +192,16 @@ int sspipe_get_bind_id(sspipe_ctx_t* ctx, int id) {
     return -1;
 }
 
+sspipe_type_t sspipe_get_type(sspipe_ctx_t* ctx, int id) {
+    sspipe_t* pipe = get_sspipe(ctx, id);
+    if (pipe) {
+        return pipe->type;
+    }
+    _LOG_E("sspipe_get_type: pipe not found, id:%d", id);
+    assert(pipe);
+    return SSPIPE_TYPE_UNPACK;
+}
+
 void* sspipe_get_userdata(sspipe_ctx_t* ctx, int in_id) {
     sspipe_t* pipe = get_sspipe(ctx, in_id);
     if (pipe) {

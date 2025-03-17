@@ -21,6 +21,7 @@ int sspipe_new(sspipe_ctx_t* ctx, int in_id, sspipe_type_t type, int is_activity
 int sspipe_bind(sspipe_ctx_t* ctx, int in_id, int out_id);
 int sspipe_unbind(sspipe_ctx_t* ctx, int in_id);
 int sspipe_get_bind_id(sspipe_ctx_t* ctx, int id);
+sspipe_type_t sspipe_get_type(sspipe_ctx_t* ctx, int id);
 void* sspipe_get_userdata(sspipe_ctx_t* ctx, int in_id);
 void sspipe_del(sspipe_ctx_t* ctx, int in_id);
 int sspipe_feed(sspipe_ctx_t* ctx, int in_id, const char* buf, int len);

@@ -11,6 +11,7 @@
 typedef struct {
     int fd;
     int is_activity;
+    int is_authed;
     ev_io* read_watcher;
     ev_io* write_watcher;
     ssp_server_t* ssp_server;
@@ -63,6 +64,7 @@ static ssp_conn_t* new_conn(ssp_server_t* ssp_server, int fd, int is_activity) {
     }
     conn->fd = fd;
     conn->is_activity = is_activity;
+    conn->is_authed = 0;
     conn->read_watcher = (ev_io*)calloc(1, sizeof(ev_io));
     if (!conn->read_watcher) {
         _LOG_E("alloc error.");
@@ -100,7 +102,10 @@ static void free_conn(ssp_conn_t* conn) {
 
 static void close_conn(ssp_server_t* ssp_server, int fd) {
     int fd2 = sspipe_get_bind_id(ssp_server->sspipe_ctx, fd);
-    assert(fd2 > 0);
+    if (fd2 < 0) {
+        _LOG_E("close_conn failed. fd: %d", fd);
+        return;
+    }
     ssp_conn_t* conn = (ssp_conn_t*)sspipe_get_userdata(ssp_server->sspipe_ctx, fd);
     assert(conn);
     ssp_conn_t* conn2 = (ssp_conn_t*)sspipe_get_userdata(ssp_server->sspipe_ctx, fd2);
@@ -129,12 +134,80 @@ static int send_all(int fd, const char* buf, int len) {
         }
         if (s == 0) {
             _LOG("server send fd: %d len: %d sent: %d s: %d error: %d", fd, len, sent, s, errno);
-            // sent = _ERR;
             break;
         }
         sent += s;
     }
     return sent;
+}
+
+// return 1 is pending
+int do_auth(ssp_conn_t* conn) {
+    _LOG("do_auth. fd: %d", conn->fd);
+    ssp_server_t* ssp_server = conn->ssp_server;
+    char buf[SSP_PACKET_HEAD_LEN + SSP_TICKET_SIZE] = {0};
+    int len = read(conn->fd, buf, sizeof(buf));
+    if (len < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            // _LOG("read EAGAIN");
+            return 1;
+        } else {
+            _LOG_E("auth read failed fd: %d error: %d", conn->fd, errno);
+            return _ERR;
+        }
+    }
+    if (len == 0) {
+        // close
+        _LOG("auth read EOF. fd:%d", conn->fd);
+        return _ERR;
+    }
+    if (len != SSP_PACKET_HEAD_LEN + SSP_TICKET_SIZE) {
+        _LOG_E("auth read len: %d error: %d", len, errno);
+        return _ERR;
+    }
+    size_t payload_len = ntohl(*(uint32_t*)buf);
+    if (payload_len != SSP_TICKET_SIZE) {
+        _LOG_W("auth failed. payload_len: %u", payload_len);
+        return _ERR;
+    }
+    char payload[SSP_PACKET_HEAD_LEN + SSP_TICKET_SIZE] = {0};
+    payload_len = 0;
+    if (strlen((const char*)ssp_server->conf->key) > 0 && strlen((const char*)ssp_server->conf->iv) > 0) {
+        if (crypto_decrypt(ssp_server->conf->key, ssp_server->conf->iv, (const unsigned char*)buf + SSP_PACKET_HEAD_LEN,
+                           SSP_TICKET_SIZE, (unsigned char*)payload, (size_t*)&payload_len)) {
+            _LOG_E("crypto decrypt failed when do_auth");
+            return _ERR;
+        }
+        assert(payload_len == SSP_TICKET_SIZE);
+        if (memcmp(payload, ssp_server->conf->ticket, SSP_TICKET_SIZE) != 0) {
+            _LOG_W("auth failed");
+            return _ERR;
+        }
+    } else {
+        if (memcmp(buf, ssp_server->conf->ticket, SSP_TICKET_SIZE) != 0) {
+            _LOG_W("auth failed");
+            return _ERR;
+        }
+    }
+    conn->is_authed = 1;
+    _LOG("auth ok. fd: %d", conn->fd);
+    return _OK;
+}
+
+// format: [len(4B)][ticket(32B)]
+static int send_auth_req(ssp_conn_t* conn) {
+    ssp_server_t* ssp_server = conn->ssp_server;
+    char buf[SSP_TICKET_SIZE] = {0};
+    int payload_len = strnlen(ssp_server->conf->ticket, SSP_TICKET_SIZE);
+    memcpy(buf, ssp_server->conf->ticket, payload_len);
+    if (sspipe_feed(ssp_server->sspipe_ctx, conn->fd, buf, payload_len) != _OK) {
+        _LOG_E("send_auth_req sspipe_feed failed");
+        return _ERR;
+    }
+    /* TODO: need ack? */
+    // conn->is_authed = 1;
+    _LOG("send_auth_req ok.");
+    return _OK;
 }
 
 ////////////////////////////////
@@ -143,14 +216,15 @@ static int send_all(int fd, const char* buf, int len) {
 
 static void write_cb(EV_P_ ev_io* w, int revents) {
     assert(revents & EV_WRITE);
-    ssp_conn_t* conn = (ssp_conn_t*)w->data;
-    assert(conn);
-    ssp_server_t* ssp_server = conn->ssp_server;
+    ssp_server_t* ssp_server = (ssp_server_t*)w->data;
     assert(ssp_server);
-    ev_io* w_watcher = conn->write_watcher;
-    assert(w_watcher);
-
     int fd = w->fd;
+    ssp_conn_t* conn = (ssp_conn_t*)sspipe_get_userdata(ssp_server->sspipe_ctx, fd);
+    if (!conn) {
+        _LOG_E("write_cb conn is null");
+        close_conn(ssp_server, fd);
+        return;
+    }
     if (!conn->is_activity) {
         conn->is_activity = 1;
         _LOG("write_cb activity fd: %d", fd);
@@ -158,11 +232,18 @@ static void write_cb(EV_P_ ev_io* w, int revents) {
     ssbuff_t* out = sspipe_take(ssp_server->sspipe_ctx, fd);
     if (!out) {
         _LOG("write_cb no data");
+        close_conn(ssp_server, fd);
         return;
     }
+    if (out->len == 0) {
+        _LOG("write_cb no data");
+        ev_io_stop(ssp_server->loop, w);
+        return;
+    }
+
     int sent = send_all(fd, out->buf, out->len);
     if (sent == _ERR) {
-        _LOG("write_cb close fd: %d sent: %d", fd, sent);
+        _LOG_E("write_cb send_all fd: %d sent: %d", fd, sent);
         close_conn(ssp_server, fd);
         return;
     }
@@ -175,7 +256,7 @@ static void write_cb(EV_P_ ev_io* w, int revents) {
     }
     assert(sent == out->len);
     out->len = 0;
-    ev_io_stop(ssp_server->loop, w_watcher);
+    ev_io_stop(ssp_server->loop, w);
     _LOG("write_cb send ok. fd: %d sent: %d", fd, sent);
 }
 
@@ -197,11 +278,28 @@ static int sspipe_output_cb(int id, void* user) {
 
 static void read_cb(EV_P_ ev_io* w, int revents) {
     assert(revents & EV_READ);
-    ssp_conn_t* conn = (ssp_conn_t*)w->data;
-    assert(conn);
-    ssp_server_t* ssp_server = conn->ssp_server;
+    ssp_server_t* ssp_server = (ssp_server_t*)w->data;
     assert(ssp_server);
     int fd = w->fd;
+    ssp_conn_t* conn = (ssp_conn_t*)sspipe_get_userdata(ssp_server->sspipe_ctx, fd);
+    if (!conn) {
+        _LOG_E("read_cb conn is null");
+        close_conn(ssp_server, fd);
+        return;
+    }
+
+    if (!conn->is_authed && ssp_server->conf->mode == SSP_MODE_REMOTE &&
+        sspipe_get_type(ssp_server->sspipe_ctx, fd) == SSPIPE_TYPE_UNPACK) {
+        int a = do_auth(conn);
+        if (a == _ERR) {
+            _LOG("auth failed. close fd: %d", fd);
+            close_conn(ssp_server, fd);
+            return;
+        }
+        if (a == 1) {
+            return;
+        }
+    }
     char buf[SSP_RECV_BUF_SIZE];
     int len = read(fd, buf, sizeof(buf));
     int ret = 0;
@@ -310,19 +408,16 @@ static void accept_cb(EV_P_ ev_io* w, int revents) {
         return;
     }
     ev_io_init(back_conn->read_watcher, read_cb, back_fd, EV_READ);
-    back_conn->read_watcher->data = back_conn;
-    ev_io_start(loop, back_conn->read_watcher);
+    back_conn->read_watcher->data = ssp_server;
 
     ev_io_init(back_conn->write_watcher, write_cb, back_fd, EV_WRITE);
-    back_conn->write_watcher->data = back_conn;
-    ev_io_start(loop, back_conn->write_watcher);
+    back_conn->write_watcher->data = ssp_server;
 
     ev_io_init(front_conn->read_watcher, read_cb, front_fd, EV_READ);
-    front_conn->read_watcher->data = front_conn;
-    ev_io_start(loop, front_conn->read_watcher);
+    front_conn->read_watcher->data = ssp_server;
 
     ev_io_init(front_conn->write_watcher, write_cb, front_fd, EV_WRITE);
-    front_conn->write_watcher->data = front_conn;
+    front_conn->write_watcher->data = ssp_server;
 
     if (sspipe_bind(ssp_server->sspipe_ctx, front_fd, back_fd) != _OK) {
         _LOG_E("sspipe_bind failed");
@@ -334,7 +429,22 @@ static void accept_cb(EV_P_ ev_io* w, int revents) {
         sspipe_del(ssp_server->sspipe_ctx, back_fd);
         return;
     }
-    sspipe_get_bind_id(ssp_server->sspipe_ctx, front_fd);
+    // send auth
+    if (ssp_server->conf->mode == SSP_MODE_LOCAL) {
+        if (send_auth_req(front_conn) != _OK) {
+            _LOG_E("send_auth_req failed. close");
+            close(front_fd);
+            close(back_fd);
+            free_conn(front_conn);
+            free_conn(front_conn);
+            sspipe_del(ssp_server->sspipe_ctx, front_fd);
+            sspipe_del(ssp_server->sspipe_ctx, back_fd);
+        }
+    }
+
+    ev_io_start(loop, back_conn->read_watcher);
+    ev_io_start(loop, back_conn->write_watcher);
+    ev_io_start(loop, front_conn->read_watcher);
 }
 
 ////////////////////////////////
