@@ -10,13 +10,13 @@ link_directories(/usr/local/lib)
 
 # 添加源文件
 set(SOURCE_FILES
+src/sspipe.c
 src/crypto.c
-src/main.c
 src/ssconf.c
 src/sslog.c
-src/sspipe.c
 src/ssbuff.c
-src/ssp_server.c
+# src/ssp_server.c
+# src/main.c
 )
 
 
