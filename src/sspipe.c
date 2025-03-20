@@ -57,8 +57,9 @@ static int pack(sspipe_t* pipe) {
         pkt_len += SSP_PACKET_HEAD_LEN;
         // encrypt
         if (ctx->key && ctx->iv) {
-            if (crypto_encrypt(ctx->key, ctx->iv, (const unsigned char*)pipe->recv_buf->buf + (pipe->recv_buf->len - remaining), payload_len, (unsigned char*)ctx->pkt_buf + SSP_PACKET_HEAD_LEN,
-                               &cipher_len) != 0) {
+            if (crypto_encrypt(ctx->key, ctx->iv,
+                               (const unsigned char*)pipe->recv_buf->buf + (pipe->recv_buf->len - remaining),
+                               payload_len, (unsigned char*)ctx->pkt_buf + SSP_PACKET_HEAD_LEN, &cipher_len) != 0) {
                 _LOG_E("pack crypto_encrypt failed");
                 return _ERR;
             }
@@ -66,7 +67,8 @@ static int pack(sspipe_t* pipe) {
             assert(cipher_len == payload_len);
             pkt_len += cipher_len;
         } else {
-            memcpy(ctx->pkt_buf + SSP_PACKET_HEAD_LEN, pipe->recv_buf->buf + (pipe->recv_buf->len - remaining), payload_len);
+            memcpy(ctx->pkt_buf + SSP_PACKET_HEAD_LEN, pipe->recv_buf->buf + (pipe->recv_buf->len - remaining),
+                   payload_len);
             pkt_len += payload_len;
         }
         // sspipe_t* out_pipe = get_sspipe(ctx, pipe->out_id);
@@ -111,7 +113,8 @@ static int unpack(sspipe_t* pipe) {
         if (pipe->recv_buf->len < payload_len + SSP_PACKET_HEAD_LEN) return _OK;
         // decrypt
         if (ctx->key && ctx->iv) {
-            if (crypto_decrypt(ctx->key, ctx->iv, (const unsigned char*)pipe->recv_buf->buf + SSP_PACKET_HEAD_LEN, payload_len, (unsigned char*)ctx->pkt_buf, &cipher_len) != 0) {
+            if (crypto_decrypt(ctx->key, ctx->iv, (const unsigned char*)pipe->recv_buf->buf + SSP_PACKET_HEAD_LEN,
+                               payload_len, (unsigned char*)ctx->pkt_buf, &cipher_len) != 0) {
                 _LOG_E("unpack crypto_decrypt failed");
                 return _ERR;
             }
@@ -151,7 +154,8 @@ static int unpack(sspipe_t* pipe) {
 // API
 ////////////////////////////////
 
-sspipe_ctx_t* sspipe_init(struct ev_loop* loop, const char* key, int key_len, const char* iv, int iv_len, int max_pkt_buf_size) {
+sspipe_ctx_t* sspipe_init(struct ev_loop* loop, const char* key, int key_len, const char* iv, int iv_len,
+                          int max_pkt_buf_size) {
     sspipe_ctx_t* ctx = (sspipe_ctx_t*)calloc(1, sizeof(sspipe_ctx_t));
     if (!ctx) {
         _LOG_E("sspipe_init: calloc failed");
@@ -225,7 +229,8 @@ sspipe_t* sspipe_get(sspipe_ctx_t* ctx, int id) {
     return pipe;
 }
 
-sspipe_t* sspipe_add(sspipe_ctx_t* ctx, int id, int need_pack, sspipe_output_cb_t output_cb, void* user, sspipe_free_user_cb_t free_user_cb) {
+sspipe_t* sspipe_add(sspipe_ctx_t* ctx, int id, int need_pack, sspipe_output_cb_t output_cb, void* user,
+                     sspipe_free_user_cb_t free_user_cb) {
     if (!ctx || id < 0) {
         return NULL;
     }
@@ -270,32 +275,34 @@ int sspipe_feed(sspipe_t* pipe, const char* buf, int len) {
 
 void sspipe_print_info(sspipe_ctx_t* ctx) {
     if (!ctx) {
-        _LOG("sspipe_ctx is NULL");
+        _LOG_E("sspipe_ctx is NULL");
         return;
     }
-    _LOG("======== SSPIPE CTX [%p] ========", ctx);
-    _LOG("Key: %s", ctx->key);
-    _LOG("IV: %s", ctx->iv);
-    _LOG("Packet Buffer: %d/%d bytes", ctx->pkt_buf ? strlen(ctx->pkt_buf) : 0, ctx->max_pkt_buf_size);
-    _LOG("======== Connected Pipes ========");
+    _LOG_E("======== SSPIPE CTX [%p] ========", ctx);
+    _LOG_E("Key: %s", ctx->key);
+    _LOG_E("IV: %s", ctx->iv);
+    _LOG_E("Packet Buffer: %d/%d bytes", ctx->pkt_buf ? strlen(ctx->pkt_buf) : 0, ctx->max_pkt_buf_size);
+    _LOG_E("======== Connected Pipes ========");
     int sum_bytes = 0, pipe_cnt = 0;
     sspipe_t *pipe, *tmp;
     HASH_ITER(hh, ctx->pipe_index, pipe, tmp) {
-        _LOG("─── Pipe ID: %d ───", pipe->id);
-        _LOG("Type: %s", pipe->need_pack ? "PACKER" : "UNPACKER");
-        _LOG("output_cb: %p", pipe->output_cb);
-        _LOG("user: %p", pipe->user);
-        _LOG("free_user_cb: %p", pipe->free_user_cb);
-        _LOG("ctx: %p", pipe->ctx);
-        _LOG("Recv Buffer: %d/%d bytes", pipe->recv_buf ? pipe->recv_buf->len : -1, pipe->recv_buf ? pipe->recv_buf->cap : -1);
-        _LOG("Send Buffer: %d/%d bytes", pipe->send_buf ? pipe->send_buf->len : -1, pipe->send_buf ? pipe->send_buf->cap : -1);
-        _LOG("Linked to: %d", pipe->outer ? pipe->outer->id : 0);
+        _LOG_E("─── Pipe ID: %d ───", pipe->id);
+        _LOG_E("Type: %s", pipe->need_pack ? "PACKER" : "UNPACKER");
+        _LOG_E("output_cb: %p", pipe->output_cb);
+        _LOG_E("user: %p", pipe->user);
+        _LOG_E("free_user_cb: %p", pipe->free_user_cb);
+        _LOG_E("ctx: %p", pipe->ctx);
+        _LOG_E("Recv Buffer: %d/%d bytes", pipe->recv_buf ? pipe->recv_buf->len : -1,
+               pipe->recv_buf ? pipe->recv_buf->cap : -1);
+        _LOG_E("Send Buffer: %d/%d bytes", pipe->send_buf ? pipe->send_buf->len : -1,
+               pipe->send_buf ? pipe->send_buf->cap : -1);
+        _LOG_E("Linked to: %d", pipe->outer ? pipe->outer->id : 0);
         if (pipe->recv_buf) sum_bytes += pipe->recv_buf->cap;
         if (pipe->send_buf) sum_bytes += pipe->send_buf->cap;
         pipe_cnt++;
     }
-    _LOG("pipes count: %d, buffer sum: %d bytes", pipe_cnt, sum_bytes);
+    _LOG_E("pipes count: %d, buffer sum: %d bytes", pipe_cnt, sum_bytes);
     if (pipe_cnt % 2 != 0) _LOG_E("invalid pipes count");
     assert(pipe_cnt % 2 == 0);
-    _LOG("================================");
+    _LOG_E("================================");
 }
