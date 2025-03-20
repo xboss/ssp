@@ -1,7 +1,5 @@
 #include "sspipe.h"
 
-#include <arpa/inet.h>
-
 inline static void free_sspipe(sspipe_t* pipe) {
     if (!pipe) {
         return;
