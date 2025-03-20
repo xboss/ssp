@@ -111,14 +111,16 @@ static void close_conn(ssp_server_t* ssp_server, int fd) {
     sspipe_t* outpipe = pipe->outer;
     ssp_conn_t* conn = (ssp_conn_t*)pipe->user;
     assert(conn);
+    close(conn->fd);
     free_conn(conn);
     sspipe_del(pipe);
     if (!outpipe) {
-        _LOG("close_conn failed. fd:%d outer fd: %d", fd, outpipe->id);
+        _LOG_E("close_conn failed. fd:%d outer fd: %d", fd, outpipe->id);
         return;
     }
     ssp_conn_t* outconn = (ssp_conn_t*)outpipe->user;
     assert(outconn);
+    close(outconn->fd);
     free_conn(outconn);
     sspipe_del(outpipe);
     _LOG("close_conn fd: %d", fd);
