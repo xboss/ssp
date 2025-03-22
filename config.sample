@@ -5,6 +5,8 @@ target_ip = 127.0.0.1
 target_port = 1112
 password = yourpassword
 ticket = yourticketyourticketyourticket12
+connect_timeout = 5000
+recv_buf_size = 32772
 log_file = xxx.log
 log_level = DEBUG|INFO|NOTICE|WARN|ERROR|FATAL
 
