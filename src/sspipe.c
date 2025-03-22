@@ -1,5 +1,7 @@
 #include "sspipe.h"
 
+#include <arpa/inet.h>
+
 inline static void free_sspipe(sspipe_t* pipe) {
     if (!pipe) {
         return;
@@ -49,7 +51,7 @@ static int pack(sspipe_t* pipe) {
     int pkt_len = 0;
     while (remaining > 0) {
         // pack and send
-        payload_len = remaining > SSP_MAX_PAYLOAD_LEN ? SSP_MAX_PAYLOAD_LEN : remaining;
+        payload_len = remaining > (ctx->max_pkt_buf_size - SSP_PACKET_HEAD_LEN) ? (ctx->max_pkt_buf_size - SSP_PACKET_HEAD_LEN) : remaining;
         uint32_t payload_len_net = htonl(payload_len);
         memcpy(ctx->pkt_buf, &payload_len_net, SSP_PACKET_HEAD_LEN);
         pkt_len += SSP_PACKET_HEAD_LEN;
@@ -69,11 +71,6 @@ static int pack(sspipe_t* pipe) {
                    payload_len);
             pkt_len += payload_len;
         }
-        // sspipe_t* out_pipe = get_sspipe(ctx, pipe->out_id);
-        // if (!out_pipe) {
-        //     _LOG_E("pack get_sspipe out_id:%d failed", pipe->out_id);
-        //     return _ERR;
-        // }
         ssbuff_append(pipe->outer->send_buf, ctx->pkt_buf, pkt_len);
         pkt_len = 0;
         _LOG("pack to target ok. payload_len:%d", payload_len);
@@ -104,8 +101,8 @@ static int unpack(sspipe_t* pipe) {
     while (pipe->recv_buf->len > 0) {
         if (pipe->recv_buf->len < SSP_PACKET_HEAD_LEN) return _OK;
         payload_len = ntohl(*(uint32_t*)pipe->recv_buf->buf);
-        if (payload_len > SSP_MAX_PAYLOAD_LEN || payload_len <= 0) {
-            _LOG_E("payload_len:%d error. max_payload:%d", payload_len, SSP_MAX_PAYLOAD_LEN);
+        if (payload_len > (ctx->max_pkt_buf_size - SSP_PACKET_HEAD_LEN) || payload_len <= 0) {
+            _LOG_E("payload_len:%d error. max_payload:%d", payload_len, (ctx->max_pkt_buf_size - SSP_PACKET_HEAD_LEN));
             return _ERR;
         }
         if (pipe->recv_buf->len < payload_len + SSP_PACKET_HEAD_LEN) return _OK;
@@ -123,11 +120,6 @@ static int unpack(sspipe_t* pipe) {
             memcpy(ctx->pkt_buf, pipe->recv_buf->buf + SSP_PACKET_HEAD_LEN, payload_len);
             pkt_len += payload_len;
         }
-        // sspipe_t* out_pipe = get_sspipe(ctx, pipe->out_id);
-        // if (!out_pipe) {
-        //     _LOG_E("pack get_sspipe out_id:%d failed", pipe->out_id);
-        //     return _ERR;
-        // }
         ssbuff_append(pipe->outer->send_buf, ctx->pkt_buf, pkt_len);
         assert(pkt_len == payload_len);
         pkt_len = 0;
@@ -279,7 +271,7 @@ void sspipe_print_info(sspipe_ctx_t* ctx) {
     _LOG_E("======== SSPIPE CTX [%p] ========", ctx);
     _LOG_E("Key: %s", ctx->key);
     _LOG_E("IV: %s", ctx->iv);
-    _LOG_E("Packet Buffer: %d/%d bytes", ctx->pkt_buf ? strlen(ctx->pkt_buf) : 0, ctx->max_pkt_buf_size);
+    _LOG_E("Packet Buffer: %d bytes", ctx->max_pkt_buf_size);
     _LOG_E("======== Connected Pipes ========");
     int sum_bytes = 0, pipe_cnt = 0;
     sspipe_t *pipe, *tmp;

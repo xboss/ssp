@@ -282,7 +282,7 @@ static int sspipe_output_cb(sspipe_t* pipe) {
     assert(conn);
     ssp_server_t* ssp_server = conn->ssp_server;
     assert(ssp_server);
-    if (!conn->is_activity && conn->ctime + SSP_CONNECT_TIMEOUT < mstime()) { /* TODO: config timeout */
+    if (!conn->is_activity && conn->ctime + ssp_server->conf->connect_timeout < mstime()) { /* TODO: config timeout */
         _LOG_E("connect timeout");
         return _ERR;
     }
@@ -316,8 +316,7 @@ static void read_cb(EV_P_ ev_io* w, int revents) {
             return;
         }
     }
-    char buf[SSP_RECV_BUF_SIZE];
-    int len = read(fd, buf, sizeof(buf));
+    int len = read(fd, ssp_server->recv_buf, ssp_server->conf->recv_buf_size);
     int ret = 0;
     do {
         if (len < 0) {
@@ -336,7 +335,7 @@ static void read_cb(EV_P_ ev_io* w, int revents) {
             ret = _ERR;
             break;
         }
-        if (sspipe_feed(pipe, buf, len) != _OK) {
+        if (sspipe_feed(pipe, ssp_server->recv_buf, len) != _OK) {
             _LOG_E("sspipe_feed failed");
             ret = _ERR;
             break;
@@ -469,10 +468,16 @@ static void accept_cb(EV_P_ ev_io* w, int revents) {
 // API
 ////////////////////////////////
 
-ssp_server_t* ssp_server_init(struct ev_loop* loop, ssconfig_t* conf) {
+ssp_server_t* ssp_server_init(struct ev_loop* loop, ssp_config_t* conf) {
     ssp_server_t* ssp_server = (ssp_server_t*)calloc(1, sizeof(ssp_server_t));
     if (ssp_server == NULL) {
         _LOG_E("sspipe_init: calloc failed");
+        return NULL;
+    }
+    ssp_server->recv_buf = (char*)calloc(1, conf->recv_buf_size);
+    if (ssp_server->recv_buf == NULL) {
+        _LOG_E("sspipe_init: calloc failed");
+        ssp_server_free(ssp_server);
         return NULL;
     }
     ssp_server->accept_watcher = (ev_io*)calloc(1, sizeof(ev_io));
@@ -484,7 +489,7 @@ ssp_server_t* ssp_server_init(struct ev_loop* loop, ssconfig_t* conf) {
     ssp_server->conf = conf;
     ssp_server->loop = loop;
     ssp_server->sspipe_ctx = sspipe_init(loop, (const char*)conf->key, AES_128_KEY_SIZE + 1, (const char*)conf->iv,
-                                         AES_BLOCK_SIZE + 1, SSP_RECV_BUF_SIZE);
+                                         AES_BLOCK_SIZE + 1, conf->recv_buf_size);
     if (ssp_server->sspipe_ctx == NULL) {
         _LOG_E("sspipe_init: sspipe_init failed");
         ssp_server_free(ssp_server);
@@ -554,13 +559,35 @@ void ssp_server_free(ssp_server_t* ssp_server) {
         sspipe_free(ssp_server->sspipe_ctx);
         ssp_server->sspipe_ctx = NULL;
     }
+    if (ssp_server->recv_buf) {
+        free(ssp_server->recv_buf);
+        ssp_server->recv_buf = NULL;
+    }
     free(ssp_server);
 }
 
 void ssp_monitor(ssp_server_t* ssp_server) {
     _LOG_E("*********************************");
-    _LOG_E("*            monitor            *")
+    _LOG_E("*            monitor            *");
     _LOG_E("*********************************");
+    if (ssp_server && ssp_server->conf) {
+        ssp_config_t* conf = ssp_server->conf;
+        _LOG_E("======== Config ========");
+        _LOG_E("Listen: %s:%hu", conf->listen_ip, conf->listen_port);
+        _LOG_E("Target: %s:%hu", conf->target_ip, conf->target_port);
+        _LOG_E("Mode: %s", conf->mode == SSP_MODE_LOCAL ? "LOCAL" : "REMOTE");
+        _LOG_E("Connect Timeout: %d ms", conf->connect_timeout);
+        _LOG_E("Recv Buffer Size: %zu", conf->recv_buf_size);
+        _LOG_E("Key: %s", conf->key);
+        _LOG_E("IV: %s", conf->iv);
+        _LOG_E("Ticket: %s", conf->ticket);
+        _LOG_E("Log File: %s (Level:%d)", conf->log_file, conf->log_level);
+    }
+    if (ssp_server) {
+        _LOG_E("======== Status ========");
+        _LOG_E("Listen FD: %d", ssp_server->listen_fd);
+        _LOG_E("SSPipe Context: %s", ssp_server->sspipe_ctx ? "Active" : "NULL");
+    }
     sspipe_print_info(ssp_server->sspipe_ctx);
     _LOG_E("---------------------------------");
 }

@@ -4,8 +4,8 @@
 #include "ssp.h"
 
 #define SSP_PACKET_HEAD_LEN 4
-#define SSP_MAX_PAYLOAD_LEN (1024 * 2)
-#define SSP_RECV_BUF_SIZE (SSP_MAX_PAYLOAD_LEN + SSP_PACKET_HEAD_LEN) * 5
+#define SSP_MAX_PAYLOAD_LEN (1024 * 32)
+#define SSP_RECV_BUF_SIZE (SSP_MAX_PAYLOAD_LEN + SSP_PACKET_HEAD_LEN)
 
 typedef struct sspipe_ctx_s sspipe_ctx_t;
 typedef struct sspipe_s sspipe_t;
