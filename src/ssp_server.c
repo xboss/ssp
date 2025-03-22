@@ -225,6 +225,7 @@ static int send_auth_req(ssp_conn_t* conn) {
 void free_conn_cb(void* user) {
     if (!user) return;
     ssp_conn_t* conn = (ssp_conn_t*)user;
+    close(conn->fd);
     free_conn(conn);
     _LOG("sspipe_free_user_cb ok.");
 }
